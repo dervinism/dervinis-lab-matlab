@@ -1,14 +1,14 @@
 function concatenatedMatrix = concatenateCells(cellArray, dimension)
 % concatenatedMatrix = concatenateCells(cellArray, dimension)
 %
-% Concatenates elements of a one-dimensional cell array into a matrix and
-% outputs it.
+% Concatenates elements of a one-dimensional cell array into a matrix.
 %
 % Args:
-%   cellArray (cell): a shape-(M, N) cell array where M = 1 or N = 1. The
-%     elements are expected to be numeric.
-%   dimension (numeric, optional): a shape-(1, 1) numeric type variable
-%     indicating the dimension along which to concatenate. 1 is default.
+%   cellArray (cell, required, positional): a shape-(M, N) cell array
+%     where M = 1 or N = 1. The elements are expected to be numeric.
+%   dimension (numeric, optional, positional): a shape-(1, 1) numeric type
+%     variable indicating the dimension along which to concatenate. 1 is
+%     default.
 %
 % Returns:
 %   concatenatedMatrix (numeric): a shape-(M, N) numeric matrix containing
