@@ -5,27 +5,29 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 %  fullInterpCoherence, half1InterpCoherence, half2InterpCoherence] = ...
 %  coherence(timesSignal, timesReference, <options>)
 %
-% Function calculates coherence and phase of (a) signal(s) with respect to
-% a reference signal.
+% Function calculates coherence and phase of a single signal or multiple
+% signals with respect to a reference signal.
 %
 % Args:
-%   spikeTimes (cell or numeric, required, positional): a shape-(1, K) cell
-%     array of shape-(1, N) numeric arrays of spike times where N
-%     corresponds to spike times. Alternatively, one can supply a
-%     shape-(1, N) numeric array of spike times (in the case of a single
-%     signal vector).
+%   timesSignal (cell or numeric, required, positional): a shape-(1, K)
+%     cell array of shape-(1, N) numeric arrays of spike times (or
+%     continuous other signals) where N corresponds to signal spike times.
+%     Alternatively, one can supply a shape-(1, N) single numeric signal
+%     array (in the case of a single signal vector).
 %   timesReference (numeric, required, positional): a shape-(1, N) numeric
-%     array of reference spike times where N corresponds to spike times.
-%   intervals (numeric, required, positional): a shape-(N, 2) numeric array
+%     array of reference spike times (or a continuous reference signal)
+%     where M corresponds to spike times.
+%   intervals (numeric, required, positional): a shape-(L, 2) numeric array
 %     of time intervals. Each row corresponds to individual time intervals
 %     of interest with the first element being the start time and the
 %     second element being the end time (default = []).
 %   stepsize (numeric, optional, keyword): a shape-(1, 1) nunmeric scalar
-%     corresponding to the new sampling interval in seconds after
-%     resampling prior to coherence analysis (default = 0.002).
+%     corresponding to the sampling interval in seconds. If point process
+%     signals are supplied (i.e., spike times), signals are converted to
+%     spike count vectors prior to coherence analysis (default = 0.002).
 %   startTime (numeric, optional, keyword): a shape-(1, 1) numeric scalar
 %     corresponding to the start time bin used to generate spike count
-%     vectors (or continuous resampled signal) for coherence analysis
+%     vectors (in the point process case) for coherence analysis
 %     (default = 0).
 %   freqRange (numeric, optional, keyword): a shape-(1, 2) numeric array
 %     with the frequency range for estimating coherence and phase values.
@@ -34,11 +36,11 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 %     with frequency interpolation points for coherence and phase values.
 %     If left empty, the original coherence analysis output frequency
 %     values are used (default).
-%   typespk1 (char, optional, keyword): a shape-(1, M) character array
+%   typespk1 (char, optional, keyword): a shape-(1, G) character array
 %     desribing the type of the signal. Can take one of the two values:
 %       'pb' - point process (default);
 %       'c' - continuous.
-%   typespk2 (char, optional, keyword): a shape-(1, M) character array
+%   typespk2 (char, optional, keyword): a shape-(1, G) character array
 %     desribing the type of the reference. Can take one of the two values:
 %       'pb' - point process (default);
 %       'c' - continuous.
@@ -85,66 +87,66 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 % Returns:
 %   fullCoherence (struct): a shape-(1, 1) scalar structure with the
 %     following fields:
-%     coherence (numeric): a shape-(K, L) numeric array containing
+%     coherence (numeric): a shape-(K, F) numeric array containing
 %       coherence values for the signal with respect to the reference
 %       (range = [0 1]).
-%     coherenceConf (numeric): a shape-(K, L) numeric array containing
+%     coherenceConf (numeric): a shape-(K, F) numeric array containing
 %       coherence 95% confidence interval. Add/subtract this interval to
 %       actual coherence values to get upper and lower intervals
 %       (coherence +/- coherenceConf).
-%     phase (numeric): a shape-(K, L) numeric array containing phase radian
+%     phase (numeric): a shape-(K, F) numeric array containing phase radian
 %       values for the signal with respect to the reference. Negative phase
 %       indicates lag, whereas positive phase indicates lead.
 %     phaseConf (cell): a shape-(K, 1) cell array containing phase upper
 %       and lower 95% confidence intervals (rad). Each cell contains a
-%       shape-(2, L) numeric array.
-%     frequency (numeric): a shape-(K, L) numeric array containing
+%       shape-(2, F) numeric array.
+%     frequency (numeric): a shape-(K, F) numeric array containing
 %       frequency values corresponding to coherence and phase estimates.
-%     rateAdjustedCoherence (numeric): a shape-(K, L) numeric array
+%     rateAdjustedCoherence (numeric): a shape-(K, F) numeric array
 %       containing firing rate adjusted coherence.
-%     rateAdjustedCoherenceConf (numeric): a shape-(K, L) numeric array
+%     rateAdjustedCoherenceConf (numeric): a shape-(K, F) numeric array
 %       containing firing rate adjusted coherence 95% confidence interval.
 %       Add/subtract this interval to actual coherence values to get upper
 %       and lower intervals
 %       (rateAdjustedCoherence +/- rateAdjustedCoherenceConf).
-%     kappaSignal (numeric): a shape-(K, L) numeric array with coherence
+%     kappaSignal (numeric): a shape-(K, F) numeric array with coherence
 %       firing rate adjustment factor kappa1 corresponding to the primary
 %       signal.
-%     kappaReference (numeric): a shape-(K, L) numeric array with
+%     kappaReference (numeric): a shape-(K, F) numeric array with
 %       coherence firing rate adjustment factor kappa2 corresponding to the
 %       secondary (reference) signal.
 %     mostCoherentFrequency (numeric): a shape-(1, 1) numeric scalar with
 %       frequency that is the most coherent on average across all signals.
 %   half1Coherence (struct): a structure with the following fields:
-%     coherence (numeric): a shape-(K, J) numeric array containing
+%     coherence (numeric): a shape-(K, E) numeric array containing
 %       coherence values for the first half of the signal with respect to
 %       the first half of the reference (range = [0 1]).
-%     coherenceConf (numeric): a shape-(K, J) numeric array containing
+%     coherenceConf (numeric): a shape-(K, E) numeric array containing
 %       coherence 95% confidence interval corresponding to the first half
 %       of the signal. Add/subtract this interval to actual coherence
 %       values to get upper and lower intervals
 %       (coherence +/- coherenceConf).
-%     phase (numeric): a shape-(K, J) numeric array containing phase radian
+%     phase (numeric): a shape-(K, E) numeric array containing phase radian
 %       values for the first half of the signal with respect to the first
 %       half of the reference. Negative phase indicates lag, whereas
 %       positive phase indicates lead.
 %     phaseConf (cell): a shape-(K, 1) cell array containing phase upper
 %       and lower 95% confidence intervals (rad) for the first half
-%       of the signal. Each cell contains a shape-(2, J) numeric array.
+%       of the signal. Each cell contains a shape-(2, E) numeric array.
 %     frequency (numeric): a shape-(K, J) numeric array containing
 %       frequency values corresponding to the first half coherence and
 %       phase estimates.
-%     rateAdjustedCoherence (numeric): a shape-(K, J) numeric array
+%     rateAdjustedCoherence (numeric): a shape-(K, E) numeric array
 %       containing firing rate adjusted coherence.
-%     rateAdjustedCoherenceConf (numeric): a shape-(K, J) numeric array
+%     rateAdjustedCoherenceConf (numeric): a shape-(K, E) numeric array
 %       containing firing rate adjusted coherence 95% confidence interval.
 %       Add/subtract this interval to actual coherence values to get upper
 %       and lower intervals
 %       (rateAdjustedCoherence +/- rateAdjustedCoherenceConf).
-%     kappaSignal (numeric): a shape-(K, J) numeric array with coherence
+%     kappaSignal (numeric): a shape-(K, E) numeric array with coherence
 %       firing rate adjustment factor kappa1 corresponding to the primary
 %       signal.
-%     kappaReference (numeric): a shape-(K, J) numeric array with
+%     kappaReference (numeric): a shape-(K, E) numeric array with
 %       coherence firing rate adjustment factor kappa2 corresponding to the
 %       secondary (reference) signal.
 %     mostCoherentFrequency (numeric): a shape-(1, 1) numeric scalar with
@@ -205,14 +207,18 @@ timesReference = timesReference(:)';
 if options.freqRange(end) == 0
   options.freqRange(end) = 0.5/options.stepsize;
 end
-if ~isempty(options.freqGrid) && numel(options.freqGrid) == 1
+if ~isempty(options.freqGrid) && isscalar(options.freqGrid)
   options.freqGrid = [];
 end
 
 
 % Resample signals (unit rates) and the reference (population rate)
-downsampledSignal = resampleSpikesArray(timesSignal, stepsize=options.stepsize, startTime=options.startTime);
-[downsampledReference, spikeTimeBins] = resampleSpikes(timesReference, stepsize=options.stepsize, startTime=options.startTime);
+if strcmpi(options.typespk1, 'pb')
+  downsampledSignal = resampleSpikesArray(timesSignal, stepsize=options.stepsize, startTime=options.startTime);
+end
+if strcmpi(options.typespk2, 'pb')
+  [downsampledReference, spikeTimeBins] = resampleSpikes(timesReference, stepsize=options.stepsize, startTime=options.startTime);
+end
 
 % Find indices of times falling within intervals of interest
 [~, includeIdx] = selectArrayValues(spikeTimeBins, options.intervals);

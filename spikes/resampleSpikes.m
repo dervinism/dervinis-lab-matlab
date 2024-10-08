@@ -1,7 +1,8 @@
 function [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(spikeTimes, options)
 % [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(spikeTimes, <stepsize>)
 %
-% Function resamples spike times series.
+% Function resamples spike times series and converts it into a spike count
+% series.
 %
 % Args:
 %   spikeTimes (numeric, required, positional): a shape-(1, N) numeric
