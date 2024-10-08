@@ -1,7 +1,7 @@
 function [resampledSpikeCounts, timeBins] = resampleSpikeCounts(spikeCounts, options)
 % [resampledSpikeCounts, timeBins] = resampleSpikeCounts(spikeCounts, <options>)
 %
-% Function resamples a spike count vectors in a row matrix.
+% Function resamples spike count vectors in a row matrix.
 %
 % Args:
 %   spikeCounts (numeric, required, positional): a shape-(M, N) numeric
