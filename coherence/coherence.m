@@ -215,9 +215,25 @@ end
 % Resample signals (unit rates) and the reference (population rate)
 if strcmpi(options.typespk1, 'pb')
   downsampledSignal = resampleSpikesArray(timesSignal, stepsize=options.stepsize, startTime=options.startTime);
+else
+  %for iSignal = 1:numel(timesSignal)
+  %  downsampledSignal{iSignal} = timesSignal{iSignal} - mean(timesSignal{iSignal}, 'omitnan'); %#ok<*AGROW>
+  %end
 end
 if strcmpi(options.typespk2, 'pb')
   [downsampledReference, spikeTimeBins] = resampleSpikes(timesReference, stepsize=options.stepsize, startTime=options.startTime);
+else
+  downsampledReference = timesReference - mean(timesReference, 'omitnan');
+  spikeTimeBins = (1:numel(downsampledReference)).*options.stepsize;
+end
+if size(downsampledSignal,2) > downsampledReference
+  warning('The signal is longer than the reference. Trimming the signal.');
+  downsampledSignal = downsampledSignal(:,1:numel(downsampledReference));
+  spikeTimeBins = spikeTimeBins(:,1:numel(downsampledReference));
+elseif size(downsampledSignal,2) < downsampledReference
+  warning('The reference is longer than the signal. Trimming the reference.');
+  downsampledReference = downsampledReference(1:size(downsampledSignal,2));
+  spikeTimeBins = spikeTimeBins(1:size(downsampledSignal,2));
 end
 
 % Find indices of times falling within intervals of interest
@@ -243,7 +259,7 @@ if options.parallelise
       typespk1=options.typespk1, typespk2=options.typespk2, ...
       winfactor=options.winfactor, freqfactor=options.freqfactor, ...
       tapers=options.tapers, decimate=options.decimate, ...
-      monotoneFreq = options.monotoneFreq, jack=options.jack, ...
+      monotoneFreq=options.monotoneFreq, jack=options.jack, ...
       pad=options.pad, fullCoherence=options.fullCoherence, ...
       halfCoherence=options.halfCoherence); %#ok<*PFBNS>
   end
@@ -255,7 +271,7 @@ else
       typespk1=options.typespk1, typespk2=options.typespk2, ...
       winfactor=options.winfactor, freqfactor=options.freqfactor, ...
       tapers=options.tapers, decimate=options.decimate, ...
-      monotoneFreq = options.monotoneFreq, jack=options.jack, ...
+      monotoneFreq=options.monotoneFreq, jack=options.jack, ...
       pad=options.pad, fullCoherence=options.fullCoherence, ...
       halfCoherence=options.halfCoherence);
   end
@@ -540,7 +556,7 @@ if ~isempty(options.freqGrid) && ~isempty(fullCoherence.frequency)
     half1InterpCoherence.phase = interpPhase(half1Coherence.frequency(1,:), ...
       half1Coherence.phase, options.freqGrid);
     half1InterpCoherence.phaseConf = interpPhase(half1Coherence.frequency(1,:), ...
-      half1Coherence.phaseConf, options.freqGrid, eliminateNegative=true);
+      half1Coherence.phaseConf, options.freqGrid);
     half1InterpCoherence.frequency = repmat(options.freqGrid, size(half1InterpCoherence.coherence,1), 1);
     half1InterpCoherence.rateAdjustedCoherence = interp1(half1Coherence.frequency(1,:), ...
       half1Coherence.rateAdjustedCoherence', options.freqGrid, 'linear', 'extrap')';
@@ -562,7 +578,7 @@ if ~isempty(options.freqGrid) && ~isempty(fullCoherence.frequency)
     half2InterpCoherence.phase = interpPhase(half2Coherence.frequency(1,:), ...
       half2Coherence.phase, options.freqGrid);
     half2InterpCoherence.phaseConf = interpPhase(half2Coherence.frequency(1,:), ...
-      half2Coherence.phaseConf, options.freqGrid, eliminateNegative=true);
+      half2Coherence.phaseConf, options.freqGrid);
     half2InterpCoherence.frequency = repmat(options.freqGrid, size(half2InterpCoherence.coherence,1), 1);
     half2InterpCoherence.rateAdjustedCoherence = interp1(half2Coherence.frequency(1,:), ...
       half2Coherence.rateAdjustedCoherence', options.freqGrid, 'linear', 'extrap')';
@@ -697,8 +713,8 @@ function [fullCoherence, half1Coherence, half2Coherence] = coherenceCalc(signal,
 %   Martynas Dervinis (martynas.dervinis@gmail.com).
 
 arguments
-  signal {mustBeVector,mustBeNonnegative}
-  reference {mustBeVector,mustBeNonnegative}
+  signal {mustBeVector,mustBeNumeric}
+  reference {mustBeVector,mustBeNumeric}
   options.freqRange (1,2) {mustBeNumeric} = [0 0]
   options.samplingInterval (1,1) {mustBeNumeric,mustBePositive} = 0.002
   options.typespk1 {mustBeMember(options.typespk1,{'pb','c'})} = 'pb'
@@ -753,6 +769,11 @@ else
   reference_1sthalf = reference(tStart:tMid);
   reference_2ndhalf = reference(tMid+1:tEnd);
 end
+
+% Reverse options as freqDependentWindowCoherence inputs are reversed (Chronux convention)
+tempOptions = options;
+options.typespk1 = tempOptions.typespk2;
+options.typespk2 = tempOptions.typespk1;
 
 % Calculate half phase and coherence
 if options.halfCoherence
@@ -938,7 +959,7 @@ function [fullPSD, half1PSD, half2PSD] = psdCalc(signal, options)
 %   Martynas Dervinis (martynas.dervinis@gmail.com).
 
 arguments
-  signal {mustBeVector,mustBeNonnegative}
+  signal {mustBeVector,mustBeNumeric}
   options.freqRange (1,2) {mustBeNumeric} = [0 0]
   options.samplingInterval (1,1) {mustBeNumeric,mustBePositive} = 0.002
   options.typespk1 {mustBeMember(options.typespk1,{'pb','c'})} = 'pb'
