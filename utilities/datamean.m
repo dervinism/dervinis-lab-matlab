@@ -36,8 +36,8 @@ function [dataMean, dataCI95, counts, dataStd, dataSEM] = datamean(data, meanTyp
 % Dependencies:
 %   Circular Statistics Toolbox (https://github.com/circstat/circstat-matlab).
 %   Non-parametric circular statistics functions for Matlab (https://github.com/dervinism/circStatNP).
-%   petersen-lab/petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %
 % Authors:
 %   Martynas Dervinis (martynas.dervinis@gmail.com)

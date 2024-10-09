@@ -79,8 +79,8 @@ function [travellingLFPWaveCollectionFile, travellingLFPWaveTimeseriesFiles] = s
 %
 % Dependencies
 %   CellExplorer (https://cellexplorer.org/)
-%   petersen-lab/petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   erfanzabeh/WaveMonk (https://github.com/erfanzabeh/WaveMonk).
 %   Circular Statistics Toolbox
 %     (https://uk.mathworks.com/matlabcentral/fileexchange/10676-circular-statistics-toolbox-directional-statistics).

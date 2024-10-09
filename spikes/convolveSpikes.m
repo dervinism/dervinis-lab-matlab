@@ -32,8 +32,8 @@ function [spikesPresentation, timeBins, parameters] = convolveSpikes(spikeTimes,
 %     contain user supplied input parameters or their default values.
 %
 % Dependencies:
-%   petersen-lab/petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   CellExplorer (https://github.com/petersenpeter/CellExplorer).
 %
 % Comments:

@@ -176,8 +176,8 @@ function [travellingWave, options] = detectTravellingChannelWaves(chSpikeTimes, 
 %
 % Dependencies
 %   CellExplorer (https://cellexplorer.org/)
-%   petersen-lab/petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   The Oscillation Score (https://www.raulmuresan.ro/sources/oscore/).
 %   erfanzabeh/WaveMonk (https://github.com/erfanzabeh/WaveMonk).
 %   Circular Statistics Toolbox

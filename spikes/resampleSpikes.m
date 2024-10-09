@@ -21,8 +21,8 @@ function [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(
 %     resampled spike times.
 %
 % Dependencies:
-%   petersen-lab/petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %
 % Authors:
 %   Martynas Dervinis (martynas.dervinis@gmail.com).

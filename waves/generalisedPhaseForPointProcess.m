@@ -61,8 +61,8 @@ function [generalisedPhase, params] = generalisedPhaseForPointProcess(times, opt
 %
 % Dependencies:
 %   CellExplorer (https://cellexplorer.org/).
-%   petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   mullerlab/generalized-phase
 %     (https://github.com/mullerlab/generalized-phase).
 %   mullerlab/wave-matlab (https://github.com/mullerlab/wave-matlab).

@@ -28,8 +28,8 @@ function filename = savePowerRatio(freqBandFilename1, freqBandFilename2, options
 %     timeseries container structure of the CellExplorer format.
 %
 % Dependencies:
-%   petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   CellExplorer (https://cellexplorer.org/).
 %
 % Authors:

@@ -176,7 +176,8 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 % Dependencies:
 %   Chronux Toolbox (http://chronux.org/).
 %   Circular Statistics Toolbox (https://github.com/circstat/circstat-matlab).
-%   petersen-lab-matlab repository (https://github.com/petersen-lab/petersen-lab-matlab).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %
 % Authors:
 %   Martynas Dervinis (martynas.dervinis@gmail.com).

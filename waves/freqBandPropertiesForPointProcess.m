@@ -105,8 +105,8 @@ function [freqBandProperties, params] = freqBandPropertiesForPointProcess(times,
 %
 % Dependencies:
 %   CellExplorer (https://cellexplorer.org/).
-%   petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   FMA Toolbox (https://github.com/michael-zugaro/FMAToolbox).
 %   Chronux Toolbox (http://chronux.org/).
 %   The latter two toolboxes are contained within buzcode/externalPackages

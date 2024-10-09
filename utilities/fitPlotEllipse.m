@@ -54,8 +54,8 @@ function [equationCoeffs, parameters, RSquare, ellipse] = fitPlotEllipse(xy, opt
 %   algebraic to the polar representations.
 %
 % Dependencies:
-%   petersen-lab/petersen-lab-matlab
-%     (https://github.com/petersen-lab/petersen-lab-matlab/).
+%   dervinism/dervinis-lab-matlab
+%     (https://github.com/dervinism/dervinis-lab-matlab).
 %   fitellipse
 %     (https://se.mathworks.com/matlabcentral/fileexchange/15125-fitellipse-m?s_tid=srchtitle).
 %   EllipseFitByTaubin
