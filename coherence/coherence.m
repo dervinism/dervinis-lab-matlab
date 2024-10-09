@@ -525,71 +525,74 @@ end
 
 % Interpolate coherence and phase values
 if ~isempty(options.freqGrid) && ~isempty(fullCoherence.frequency)
+  interpFrequencyExtended = sort(unique([options.freqGrid fullCoherence.frequency(1,:)]));
   fullInterpCoherence.coherence = interp1(fullCoherence.frequency(1,:), ...
-    fullCoherence.coherence', options.freqGrid, 'linear', 'extrap')';
+    fullCoherence.coherence', interpFrequencyExtended, 'linear', 'extrap')';
   fullInterpCoherence.coherence(fullInterpCoherence.coherence < 0) = 0;
   fullInterpCoherence.coherenceConf = interp1(fullCoherence.frequency(1,:), ...
-    fullCoherence.coherenceConf', options.freqGrid, 'linear', 'extrap')';
+    fullCoherence.coherenceConf', interpFrequencyExtended, 'linear', 'extrap')';
   fullInterpCoherence.coherenceConf(fullInterpCoherence.coherenceConf < 0) = 0;
   fullInterpCoherence.phase = interpPhase(fullCoherence.frequency(1,:), ...
     fullCoherence.phase, options.freqGrid);
   fullInterpCoherence.phaseConf = interpPhase(fullCoherence.frequency(1,:), ...
     fullCoherence.phaseConf, options.freqGrid);
-  fullInterpCoherence.frequency = repmat(options.freqGrid, size(fullInterpCoherence.coherence,1), 1);
+  fullInterpCoherence.frequency = repmat(interpFrequencyExtended, size(fullInterpCoherence.coherence,1), 1);
   fullInterpCoherence.rateAdjustedCoherence = interp1(fullCoherence.frequency(1,:), ...
-    fullCoherence.rateAdjustedCoherence', options.freqGrid, 'linear', 'extrap')';
+    fullCoherence.rateAdjustedCoherence', interpFrequencyExtended, 'linear', 'extrap')';
   fullInterpCoherence.rateAdjustedCoherence(fullInterpCoherence.rateAdjustedCoherence < 0) = 0;
   fullInterpCoherence.rateAdjustedCoherenceConf = interp1(fullCoherence.frequency(1,:), ...
-    fullCoherence.rateAdjustedCoherenceConf', options.freqGrid, 'linear', 'extrap')';
+    fullCoherence.rateAdjustedCoherenceConf', interpFrequencyExtended, 'linear', 'extrap')';
   fullInterpCoherence.rateAdjustedCoherenceConf(fullInterpCoherence.rateAdjustedCoherenceConf < 0) = 0;
   fullInterpCoherence.kappaSignal = interp1(fullCoherence.frequency(1,:), ...
-    fullCoherence.kappaSignal', options.freqGrid, 'linear', 'extrap')';
+    fullCoherence.kappaSignal', interpFrequencyExtended, 'linear', 'extrap')';
   fullInterpCoherence.kappaReference = interp1(fullCoherence.frequency(1,:), ...
-    fullCoherence.kappaReference', options.freqGrid, 'linear', 'extrap')';
+    fullCoherence.kappaReference', interpFrequencyExtended, 'linear', 'extrap')';
   if options.halfCoherence
+    interpFrequencyExtended = sort(unique([options.freqGrid half1Coherence.frequency(1,:)]));
     half1InterpCoherence.coherence = interp1(half1Coherence.frequency(1,:), ...
-      half1Coherence.coherence', options.freqGrid, 'linear', 'extrap')';
+      half1Coherence.coherence', interpFrequencyExtended, 'linear', 'extrap')';
     half1InterpCoherence.coherence(half1InterpCoherence.coherence < 0) = 0;
     half1InterpCoherence.coherenceConf = interp1(half1Coherence.frequency(1,:), ...
-      half1Coherence.coherenceConf', options.freqGrid, 'linear', 'extrap')';
+      half1Coherence.coherenceConf', interpFrequencyExtended, 'linear', 'extrap')';
     half1InterpCoherence.coherenceConf(half1InterpCoherence.coherenceConf < 0) = 0;
     half1InterpCoherence.phase = interpPhase(half1Coherence.frequency(1,:), ...
       half1Coherence.phase, options.freqGrid);
     half1InterpCoherence.phaseConf = interpPhase(half1Coherence.frequency(1,:), ...
       half1Coherence.phaseConf, options.freqGrid);
-    half1InterpCoherence.frequency = repmat(options.freqGrid, size(half1InterpCoherence.coherence,1), 1);
+    half1InterpCoherence.frequency = repmat(interpFrequencyExtended, size(half1InterpCoherence.coherence,1), 1);
     half1InterpCoherence.rateAdjustedCoherence = interp1(half1Coherence.frequency(1,:), ...
-      half1Coherence.rateAdjustedCoherence', options.freqGrid, 'linear', 'extrap')';
+      half1Coherence.rateAdjustedCoherence', interpFrequencyExtended, 'linear', 'extrap')';
     half1InterpCoherence.rateAdjustedCoherence(half1InterpCoherence.rateAdjustedCoherence < 0) = 0;
     half1InterpCoherence.rateAdjustedCoherenceConf = interp1(half1Coherence.frequency(1,:), ...
-      half1Coherence.rateAdjustedCoherenceConf', options.freqGrid, 'linear', 'extrap')';
+      half1Coherence.rateAdjustedCoherenceConf', interpFrequencyExtended, 'linear', 'extrap')';
     half1InterpCoherence.rateAdjustedCoherenceConf(half1InterpCoherence.rateAdjustedCoherenceConf < 0) = 0;
     half1InterpCoherence.kappaSignal = interp1(half1Coherence.frequency(1,:), ...
-      half1Coherence.kappaSignal', options.freqGrid, 'linear', 'extrap')';
+      half1Coherence.kappaSignal', interpFrequencyExtended, 'linear', 'extrap')';
     half1InterpCoherence.kappaReference = interp1(half1Coherence.frequency(1,:), ...
-      half1Coherence.kappaReference', options.freqGrid, 'linear', 'extrap')';
+      half1Coherence.kappaReference', interpFrequencyExtended, 'linear', 'extrap')';
     
+    interpFrequencyExtended = sort(unique([options.freqGrid half2Coherence.frequency(1,:)]));
     half2InterpCoherence.coherence = interp1(half2Coherence.frequency(1,:), ...
-      half2Coherence.coherence', options.freqGrid, 'linear', 'extrap')';
+      half2Coherence.coherence', interpFrequencyExtended, 'linear', 'extrap')';
     half2InterpCoherence.coherence(half2InterpCoherence.coherence < 0) = 0;
     half2InterpCoherence.coherenceConf = interp1(half2Coherence.frequency(1,:), ...
-      half2Coherence.coherenceConf', options.freqGrid, 'linear', 'extrap')';
+      half2Coherence.coherenceConf', interpFrequencyExtended, 'linear', 'extrap')';
     half2InterpCoherence.coherenceConf(half2InterpCoherence.coherenceConf < 0) = 0;
     half2InterpCoherence.phase = interpPhase(half2Coherence.frequency(1,:), ...
       half2Coherence.phase, options.freqGrid);
     half2InterpCoherence.phaseConf = interpPhase(half2Coherence.frequency(1,:), ...
       half2Coherence.phaseConf, options.freqGrid);
-    half2InterpCoherence.frequency = repmat(options.freqGrid, size(half2InterpCoherence.coherence,1), 1);
+    half2InterpCoherence.frequency = repmat(interpFrequencyExtended, size(half2InterpCoherence.coherence,1), 1);
     half2InterpCoherence.rateAdjustedCoherence = interp1(half2Coherence.frequency(1,:), ...
-      half2Coherence.rateAdjustedCoherence', options.freqGrid, 'linear', 'extrap')';
+      half2Coherence.rateAdjustedCoherence', interpFrequencyExtended, 'linear', 'extrap')';
     half2InterpCoherence.rateAdjustedCoherence(half2InterpCoherence.rateAdjustedCoherence < 0) = 0;
     half2InterpCoherence.rateAdjustedCoherenceConf = interp1(half2Coherence.frequency(1,:), ...
-      half2Coherence.rateAdjustedCoherenceConf', options.freqGrid, 'linear', 'extrap')';
+      half2Coherence.rateAdjustedCoherenceConf', interpFrequencyExtended, 'linear', 'extrap')';
     half2InterpCoherence.rateAdjustedCoherenceConf(half2InterpCoherence.rateAdjustedCoherenceConf < 0) = 0;
     half2InterpCoherence.kappaSignal = interp1(half2Coherence.frequency(1,:), ...
-      half2Coherence.kappaSignal', options.freqGrid, 'linear', 'extrap')';
+      half2Coherence.kappaSignal', interpFrequencyExtended, 'linear', 'extrap')';
     half2InterpCoherence.kappaReference = interp1(half2Coherence.frequency(1,:), ...
-      half2Coherence.kappaReference', options.freqGrid, 'linear', 'extrap')';
+      half2Coherence.kappaReference', interpFrequencyExtended, 'linear', 'extrap')';
   else
     half1InterpCoherence = [];
     half2InterpCoherence = [];
