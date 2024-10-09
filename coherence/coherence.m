@@ -11,12 +11,17 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 % Args:
 %   timesSignal (cell or numeric, required, positional): a shape-(1, K)
 %     cell array of shape-(1, N) numeric arrays of spike times (or
-%     continuous other signals) where N corresponds to signal spike times.
-%     Alternatively, one can supply a shape-(1, N) single numeric signal
-%     array (in the case of a single signal vector).
-%   timesReference (numeric, required, positional): a shape-(1, N) numeric
-%     array of reference spike times (or a continuous reference signal)
-%     where M corresponds to spike times.
+%     continuous other signals; cannot mix both point processes and
+%     continuous signals) where N corresponds to signal spike times (or
+%     continuous samples). Alternatively, one can supply a shape-(1, N)
+%     single numeric signal array (in the case of a single signal vector).
+%   timesReference (cell or numeric, required, positional): a shape-(1, K)
+%     cell array of shape-(1, M) numeric arrays of reference spike times
+%     (or continuous other signals; cannot mix both point processes and
+%     continuous signals) where M corresponds to reference signal spike
+%     times. Alternatively, one can supply a shape-(1, M) single numeric
+%     reference signal array (in the case where all K reference signals are
+%     the same).
 %   intervals (numeric, required, positional): a shape-(L, 2) numeric array
 %     of time intervals. Each row corresponds to individual time intervals
 %     of interest with the first element being the start time and the
@@ -178,7 +183,7 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 
 arguments
   timesSignal (1,:) {mustBeNumericOrListedType(timesSignal,'cell')}
-  timesReference {mustBeVector,mustBeNonnegative,mustBeNonempty}
+  timesReference (1,:) {mustBeNumericOrListedType(timesReference,'cell')}
   options.intervals (:,2) {mustBeNumeric,mustBeNonnegative} = [];
   options.stepsize (1,1) {mustBeNumeric,mustBePositive} = 0.002
   options.startTime (1,1) {mustBeNumeric,mustBeNonnegative} = 0
@@ -201,9 +206,16 @@ end
 
 % Parse input
 if ~iscell(timesSignal)
+  timesSignal = timesSignal(:)';
   timesSignal = {timesSignal};
 end
-timesReference = timesReference(:)';
+if ~iscell(timesReference)
+  timesReference = timesReference(:)';
+  timesReference = {timesReference};
+else
+  assert(numel(timesSignal) == numel(timesReference), ...
+    'The timesReference cell array has to have the same number of elements as the timesSignal cell array.')
+end
 if options.freqRange(end) == 0
   options.freqRange(end) = 0.5/options.stepsize;
 end
@@ -212,32 +224,61 @@ if ~isempty(options.freqGrid) && isscalar(options.freqGrid)
 end
 
 
-% Resample signals (unit rates) and the reference (population rate)
+% Resample signals (unit rates)
 if strcmpi(options.typespk1, 'pb')
-  downsampledSignal = resampleSpikesArray(timesSignal, stepsize=options.stepsize, startTime=options.startTime);
+  [downsampledSignal, signalTimeBins] = resampleSpikesArray(timesSignal, stepsize=options.stepsize, startTime=options.startTime);
 else
-  %for iSignal = 1:numel(timesSignal)
-  %  downsampledSignal{iSignal} = timesSignal{iSignal} - mean(timesSignal{iSignal}, 'omitnan'); %#ok<*AGROW>
-  %end
-end
-if strcmpi(options.typespk2, 'pb')
-  [downsampledReference, spikeTimeBins] = resampleSpikes(timesReference, stepsize=options.stepsize, startTime=options.startTime);
-else
-  downsampledReference = timesReference - mean(timesReference, 'omitnan');
-  spikeTimeBins = (1:numel(downsampledReference)).*options.stepsize;
-end
-if size(downsampledSignal,2) > downsampledReference
-  warning('The signal is longer than the reference. Trimming the signal.');
-  downsampledSignal = downsampledSignal(:,1:numel(downsampledReference));
-  spikeTimeBins = spikeTimeBins(:,1:numel(downsampledReference));
-elseif size(downsampledSignal,2) < downsampledReference
-  warning('The reference is longer than the signal. Trimming the reference.');
-  downsampledReference = downsampledReference(1:size(downsampledSignal,2));
-  spikeTimeBins = spikeTimeBins(1:size(downsampledSignal,2));
+  if numel(timesSignal) > 1
+    for iSignal = 2:numel(timesSignal)
+      assert(numel(timesSignal{iSignal-1}) == numel(timesSignal{iSignal}), ...
+        'Individual signals must be of the same length.')
+    end
+  end
+  downsampledSignal = timesSignal;
+  signalTimeBins = (1:numel(downsampledSignal{1})).*options.stepsize;
 end
 
+% Resample references (population rates)
+nRefs = numel(timesReference);
+if strcmpi(options.typespk2, 'pb')
+  [downsampledReference, refTimeBins] = resampleSpikesArray(timesReference, stepsize=options.stepsize, startTime=options.startTime);
+else
+  if numel(timesReference) > 1
+    for iSignal = 2:numel(timesReference)
+      assert(numel(timesReference{iSignal-1}) == numel(timesReference{iSignal}), ...
+        'Individual references must be of the same length.')
+    end
+  end
+  downsampledReference = timesReference;
+  refTimeBins = (1:numel(downsampledReference{1})).*options.stepsize;
+end
+
+% Trim signals and references, if needed
+if numel(signalTimeBins) > numel(refTimeBins)
+  warning('The signal is longer than the reference. Trimming the signal.');
+  if iscell(downsampledSignal)
+    for iSignal = 1:numel(downsampledSignal)
+      downsampledSignal{iSignal} = downsampledSignal{iSignal}(1:numel(refTimeBins));
+    end
+  else
+    downsampledSignal = downsampledSignal(:,1:numel(refTimeBins));
+  end
+  signalTimeBins = signalTimeBins(1:numel(refTimeBins));
+elseif numel(signalTimeBins) < numel(refTimeBins)
+  warning('The reference is longer than the signal. Trimming the reference.');
+  if iscell(downsampledReference)
+    for iRef = 1:numel(downsampledReference)
+      downsampledReference{iRef} = downsampledReference{iRef}(1:numel(signalTimeBins));
+    end
+  else
+    downsampledReference = downsampledReference(:,1:numel(signalTimeBins));
+  end
+  refTimeBins = refTimeBins(1:numel(signalTimeBins));
+end
+assert(all(signalTimeBins == refTimeBins));
+
 % Find indices of times falling within intervals of interest
-[~, includeIdx] = selectArrayValues(spikeTimeBins, options.intervals);
+[~, includeInds] = selectArrayValues(refTimeBins, options.intervals);
 
 % Calculate phase and coherence for all signals
 nUnits = numel(timesSignal);
@@ -252,27 +293,45 @@ if options.parallelise
     delete(gcp('nocreate'));
     parpool('local', feature('numcores'));
   end
-  parfor unit = 1:nUnits
-    [fullCoherence_temp{unit}, half1Coherence_temp{unit}, half2Coherence_temp{unit}] = coherenceCalc( ...
-      downsampledSignal(unit,includeIdx), downsampledReference(includeIdx), ...
-      freqRange=options.freqRange, samplingInterval=options.stepsize, ...
-      typespk1=options.typespk1, typespk2=options.typespk2, ...
-      winfactor=options.winfactor, freqfactor=options.freqfactor, ...
-      tapers=options.tapers, decimate=options.decimate, ...
-      monotoneFreq=options.monotoneFreq, jack=options.jack, ...
-      pad=options.pad, fullCoherence=options.fullCoherence, ...
+  parfor iUnit = 1:nUnits
+    if iscell(downsampledSignal)
+      signal = downsampledSignal{iUnit}(includeInds);
+    else
+      signal = downsampledSignal(iUnit,includeInds);
+    end
+    if iscell(downsampledReference)
+      reference = downsampledReference{min([iUnit nRefs])}(includeInds);
+    else
+      reference = downsampledReference(min([iUnit nRefs]),includeInds);
+    end
+    [fullCoherence_temp{iUnit}, half1Coherence_temp{iUnit}, half2Coherence_temp{iUnit}] = ...
+      coherenceCalc(signal, reference, freqRange=options.freqRange, ...
+      samplingInterval=options.stepsize, typespk1=options.typespk1, ...
+      typespk2=options.typespk2, winfactor=options.winfactor, ...
+      freqfactor=options.freqfactor, tapers=options.tapers, ...
+      decimate=options.decimate, monotoneFreq=options.monotoneFreq, ...
+      jack=options.jack, pad=options.pad, fullCoherence=options.fullCoherence, ...
       halfCoherence=options.halfCoherence); %#ok<*PFBNS>
   end
 else
-  for unit = 1:nUnits
-    [fullCoherence_temp{unit}, half1Coherence_temp{unit}, half2Coherence_temp{unit}] = coherenceCalc( ...
-      downsampledSignal(unit,includeIdx), downsampledReference(includeIdx), ...
-      freqRange=options.freqRange, samplingInterval=options.stepsize, ...
-      typespk1=options.typespk1, typespk2=options.typespk2, ...
-      winfactor=options.winfactor, freqfactor=options.freqfactor, ...
-      tapers=options.tapers, decimate=options.decimate, ...
-      monotoneFreq=options.monotoneFreq, jack=options.jack, ...
-      pad=options.pad, fullCoherence=options.fullCoherence, ...
+  for iUnit = 1:nUnits
+    if iscell(downsampledSignal)
+      signal = downsampledSignal{iUnit}(includeInds);
+    else
+      signal = downsampledSignal(iUnit,includeInds);
+    end
+    if iscell(downsampledReference)
+      reference = downsampledReference{min([iUnit nRefs])}(includeInds);
+    else
+      reference = downsampledReference(min([iUnit nRefs]),includeInds);
+    end
+    [fullCoherence_temp{iUnit}, half1Coherence_temp{iUnit}, half2Coherence_temp{iUnit}] = ...
+      coherenceCalc(signal, reference, freqRange=options.freqRange, ...
+      samplingInterval=options.stepsize, typespk1=options.typespk1, ...
+      typespk2=options.typespk2, winfactor=options.winfactor, ...
+      freqfactor=options.freqfactor, tapers=options.tapers, ...
+      decimate=options.decimate, monotoneFreq=options.monotoneFreq, ...
+      jack=options.jack, pad=options.pad, fullCoherence=options.fullCoherence, ...
       halfCoherence=options.halfCoherence);
   end
 end
@@ -323,21 +382,50 @@ end
 if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.typespk2,'pb')) ...
     && (options.fullCoherence || options.halfCoherence)
   % Reference (population rate)
+  mfrFullReference = ones(nRefs,1);
+  mfrHalvesReference = ones(nRefs,2);
   if strcmpi(options.typespk2,'pb') % Mean firing rates
-    [mfrFullReference, mfrHalvesReference] = rateCalc( ...
-      downsampledReference(includeIdx), samplingInterval=options.stepsize);
-  else
-    mfrFullReference = 1;
-    mfrHalvesReference = [1 1];
+    for iUnit = 1:nRefs
+      [mfrFullReference(iUnit), mfrHalvesReference(iUnit,:)] = rateCalc( ...
+        downsampledReference(iUnit,includeInds), samplingInterval=options.stepsize);
+    end
   end
-  [fullPSDReference, half1PSDReference, half2PSDReference] = psdCalc( ...
-    downsampledReference(includeIdx), freqRange=options.freqRange, ...
-    samplingInterval=options.stepsize, typespk1=options.typespk2, ...
-    winfactor=options.winfactor, freqfactor=options.freqfactor, ...
-    tapers=options.tapers, decimate=options.decimate, ...
-    monotoneFreq = options.monotoneFreq, jack=options.jack, ...
-    pad=options.pad, fullPSD=options.fullCoherence, ...
-    halfPSD=options.halfCoherence); % PSDs
+  fullPSDReference = {};
+  half1PSDReference = {};
+  half2PSDReference = {};
+  if options.parallelise
+    parfor iUnit = 1:nRefs
+      if iscell(downsampledReference)
+        reference = downsampledReference{iUnit}(includeInds);
+      else
+        reference = downsampledReference(iUnit,includeInds);
+      end
+      [fullPSDReference{iUnit}, half1PSDReference{iUnit}, ...
+        half2PSDReference{iUnit}] = psdCalc(reference, ...
+        freqRange=options.freqRange, samplingInterval=options.stepsize, ...
+        typespk1=options.typespk2, winfactor=options.winfactor, ...
+        freqfactor=options.freqfactor, tapers=options.tapers, ...
+        decimate=options.decimate, monotoneFreq=options.monotoneFreq, ...
+        jack=options.jack, pad=options.pad, fullPSD=options.fullCoherence, ...
+        halfPSD=options.halfCoherence); % PSDs
+    end
+  else
+    for iUnit = 1:nRefs
+      if iscell(downsampledReference)
+        reference = downsampledReference{iUnit}(includeInds);
+      else
+        reference = downsampledReference(iUnit,includeInds);
+      end
+      [fullPSDReference{iUnit}, half1PSDReference{iUnit}, ...
+        half2PSDReference{iUnit}] = psdCalc(reference, ...
+        freqRange=options.freqRange, samplingInterval=options.stepsize, ...
+        typespk1=options.typespk2, winfactor=options.winfactor, ...
+        freqfactor=options.freqfactor, tapers=options.tapers, ...
+        decimate=options.decimate, monotoneFreq=options.monotoneFreq, ...
+        jack=options.jack, pad=options.pad, fullPSD=options.fullCoherence, ...
+        halfPSD=options.halfCoherence); %#ok<*AGROW> % PSDs
+    end
+  end
 
   % Signal (unit rates)
   mfrFullSignal = zeros(nUnits,1); % Initialise containers
@@ -346,10 +434,10 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
   half1PSDSignal = cell(nUnits,1);
   half2PSDSignal = cell(nUnits,1);
   if options.fullCoherence
-    fullCoherence.rateAdjustedCoherence = zeros(nUnits,numel(fullPSDReference.psd));
-    fullCoherence.rateAdjustedCoherenceConf = zeros(nUnits,numel(fullPSDReference.psd));
-    fullCoherence.kappaSignal = zeros(nUnits,numel(fullPSDReference.psd));
-    fullCoherence.kappaReference = zeros(nUnits,numel(fullPSDReference.psd));
+    fullCoherence.rateAdjustedCoherence = zeros(nUnits,numel(fullPSDReference{1}.psd));
+    fullCoherence.rateAdjustedCoherenceConf = zeros(nUnits,numel(fullPSDReference{1}.psd));
+    fullCoherence.kappaSignal = zeros(nUnits,numel(fullPSDReference{1}.psd));
+    fullCoherence.kappaReference = zeros(nUnits,numel(fullPSDReference{1}.psd));
   else
     fullCoherence.rateAdjustedCoherence = [];
     fullCoherence.rateAdjustedCoherenceConf = [];
@@ -357,14 +445,14 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
     fullCoherence.kappaReference = [];
   end
   if options.halfCoherence
-    half1Coherence.rateAdjustedfCoherence = zeros(nUnits,numel(half1PSDReference.psd));
-    half1Coherence.rateAdjustedfCoherenceConf = zeros(nUnits,numel(half1PSDReference.psd));
-    half1Coherence.kappaSignal = zeros(nUnits,numel(half1PSDReference.psd));
-    half1Coherence.kappaReference = zeros(nUnits,numel(half1PSDReference.psd));
-    half2Coherence.rateAdjustedfCoherence = zeros(nUnits,numel(half2PSDReference.psd));
-    half2Coherence.rateAdjustedfCoherenceConf = zeros(nUnits,numel(half2PSDReference.psd));
-    half2Coherence.kappaSignal = zeros(nUnits,numel(half2PSDReference.psd));
-    half2Coherence.kappaReference = zeros(nUnits,numel(half2PSDReference.psd));
+    half1Coherence.rateAdjustedfCoherence = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half1Coherence.rateAdjustedfCoherenceConf = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half1Coherence.kappaSignal = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half1Coherence.kappaReference = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half2Coherence.rateAdjustedfCoherence = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    half2Coherence.rateAdjustedfCoherenceConf = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    half2Coherence.kappaSignal = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    half2Coherence.kappaReference = zeros(nUnits,numel(half2PSDReference{1}.psd));
   else
     half1Coherence.rateAdjustedfCoherence = [];
     half1Coherence.rateAdjustedfCoherenceConf = [];
@@ -376,28 +464,33 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
     half2Coherence.kappaReference = [];
   end
   if options.parallelise
-    fullCoherence_rateAdjustedCoherence = zeros(nUnits,numel(fullPSDReference.psd)); % These are temporary containers to enable running the parfor loop
-    fullCoherence_kappaSignal = zeros(nUnits,numel(fullPSDReference.psd));
-    fullCoherence_kappaReference = zeros(nUnits,numel(fullPSDReference.psd));
-    fullCoherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(fullPSDReference.psd));
-    half1Coherence_rateAdjustedCoherence = zeros(nUnits,numel(half1PSDReference.psd));
-    half1Coherence_kappaSignal = zeros(nUnits,numel(half1PSDReference.psd));
-    half1Coherence_kappaReference = zeros(nUnits,numel(half1PSDReference.psd));
-    half1Coherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(half1PSDReference.psd));
-    half2Coherence_rateAdjustedCoherence = zeros(nUnits,numel(half2PSDReference.psd));
-    half2Coherence_kappaSignal = zeros(nUnits,numel(half2PSDReference.psd));
-    half2Coherence_kappaReference = zeros(nUnits,numel(half2PSDReference.psd));
-    half2Coherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(half2PSDReference.psd));
-    parfor unit = 1:nUnits
+    fullCoherence_rateAdjustedCoherence = zeros(nUnits,numel(fullPSDReference{1}.psd)); % These are temporary containers to enable running the parfor loop
+    fullCoherence_kappaSignal = zeros(nUnits,numel(fullPSDReference{1}.psd));
+    fullCoherence_kappaReference = zeros(nUnits,numel(fullPSDReference{1}.psd));
+    fullCoherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(fullPSDReference{1}.psd));
+    half1Coherence_rateAdjustedCoherence = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half1Coherence_kappaSignal = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half1Coherence_kappaReference = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half1Coherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(half1PSDReference{1}.psd));
+    half2Coherence_rateAdjustedCoherence = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    half2Coherence_kappaSignal = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    half2Coherence_kappaReference = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    half2Coherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(half2PSDReference{1}.psd));
+    parfor iUnit = 1:nUnits
       if strcmpi(options.typespk1,'pb') % Mean firing rates
-        [mfrFullSignal(unit), mfrHalvesSignal(unit,:)] = rateCalc( ...
-          downsampledSignal(unit,includeIdx), samplingInterval=options.stepsize); %#ok<*PFOUS>
+        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc( ...
+          downsampledSignal(iUnit,includeInds), samplingInterval=options.stepsize); %#ok<*PFOUS>
       else
-        mfrFullSignal(unit) = 1;
-        mfrHalvesSignal(unit,:) = [1 1];
+        mfrFullSignal(iUnit) = 1;
+        mfrHalvesSignal(iUnit,:) = [1 1];
       end
-      [fullPSDSignal{unit}, half1PSDSignal{unit}, half2PSDSignal{unit}] = psdCalc( ...
-        downsampledSignal(unit,includeIdx), freqRange=options.freqRange, ...
+      if iscell(downsampledSignal)
+        signal = downsampledSignal{iUnit}(includeInds);
+      else
+        signal = downsampledSignal(iUnit,includeInds);
+      end
+      [fullPSDSignal{iUnit}, half1PSDSignal{iUnit}, half2PSDSignal{iUnit}] = ...
+        psdCalc(signal, freqRange=options.freqRange, ...
         samplingInterval=options.stepsize, typespk1=options.typespk1, ...
         winfactor=options.winfactor, freqfactor=options.freqfactor, ...
         tapers=options.tapers, decimate=options.decimate, ...
@@ -406,29 +499,30 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
         halfPSD=options.halfCoherence); % PSDs
       % Full signal
       if options.fullCoherence
-        [fullCoherence_rateAdjustedCoherence(unit,:), fullCoherence_kappaSignal(unit,:), ...
-          fullCoherence_kappaReference(unit,:)] = coherenceRateAdjustment( ...
-          mfrFullSignal(unit), mfrFullReference, fullPSDSignal{unit}.psd, fullPSDReference.psd, ...
-          fullCoherence.coherence(unit,:), samplingInterval=options.stepsize); % Full coherence
-        fullCoherence_rateAdjustedCoherenceConf(unit,:) = ... % Full coherence 95% confidence intervals
-          fullCoherence_kappaSignal(unit,:).*fullCoherence_kappaReference(unit,:).*fullCoherence.coherenceConf(unit,:);
+        [fullCoherence_rateAdjustedCoherence(iUnit,:), fullCoherence_kappaSignal(iUnit,:), ...
+          fullCoherence_kappaReference(iUnit,:)] = coherenceRateAdjustment( ...
+          mfrFullSignal(iUnit), mfrFullReference(iUnit), fullPSDSignal{iUnit}.psd, fullPSDReference{iUnit}.psd, ...
+          fullCoherence.coherence(iUnit,:), samplingInterval=options.stepsize); % Full coherence
+        fullCoherence_rateAdjustedCoherenceConf(iUnit,:) = ... % Full coherence 95% confidence intervals
+          fullCoherence_kappaSignal(iUnit,:).*fullCoherence_kappaReference(iUnit,:).*fullCoherence.coherenceConf(iUnit,:);
       end
       if options.halfCoherence
         % The first half of the signal
-        mfrHalvesSignal_unit = mfrHalvesSignal(unit,:);
-        [half1Coherence_rateAdjustedCoherence(unit,:), half1Coherence_kappaSignal(unit,:), ...
-          half1Coherence_kappaReference(unit,:)] = coherenceRateAdjustment( ...
-          mfrHalvesSignal_unit(1), mfrHalvesReference(1), half1PSDSignal{unit}.psd, half1PSDReference.psd, ...
-          half1Coherence.coherence(unit,:), samplingInterval=options.stepsize); % Full coherence
-        half1Coherence_rateAdjustedCoherenceConf(unit,:) = ... % Full coherence 95% confidence intervals
-          half1Coherence_kappaSignal(unit,:).*half1Coherence_kappaReference(unit,:).*half1Coherence.coherenceConf(unit,:);
+        mfrHalvesSignal_unit = mfrHalvesSignal(iUnit,:);
+        mfrHalvesReference_unit = mfrHalvesReference(iUnit,:);
+        [half1Coherence_rateAdjustedCoherence(iUnit,:), half1Coherence_kappaSignal(iUnit,:), ...
+          half1Coherence_kappaReference(iUnit,:)] = coherenceRateAdjustment( ...
+          mfrHalvesSignal_unit(1), mfrHalvesReference_unit(1), half1PSDSignal{iUnit}.psd, half1PSDReference{iUnit}.psd, ...
+          half1Coherence.coherence(iUnit,:), samplingInterval=options.stepsize); % Full coherence
+        half1Coherence_rateAdjustedCoherenceConf(iUnit,:) = ... % Full coherence 95% confidence intervals
+          half1Coherence_kappaSignal(iUnit,:).*half1Coherence_kappaReference(iUnit,:).*half1Coherence.coherenceConf(iUnit,:);
         % The second half of the signal
-        [half2Coherence_rateAdjustedCoherence(unit,:), half2Coherence_kappaSignal(unit,:), ...
-          half2Coherence_kappaReference(unit,:)] = coherenceRateAdjustment( ...
-          mfrHalvesSignal_unit(2), mfrHalvesReference(2), half2PSDSignal{unit}.psd, half2PSDReference.psd, ...
-          half2Coherence.coherence(unit,:), samplingInterval=options.stepsize); % Full coherence
-        half2Coherence_rateAdjustedCoherenceConf(unit,:) = ... % Full coherence 95% confidence intervals
-          half2Coherence_kappaSignal(unit,:).*half2Coherence_kappaReference(unit,:).*half2Coherence.coherenceConf(unit,:);
+        [half2Coherence_rateAdjustedCoherence(iUnit,:), half2Coherence_kappaSignal(iUnit,:), ...
+          half2Coherence_kappaReference(iUnit,:)] = coherenceRateAdjustment( ...
+          mfrHalvesSignal_unit(2), mfrHalvesReference_unit(2), half2PSDSignal{iUnit}.psd, half2PSDReference{iUnit}.psd, ...
+          half2Coherence.coherence(iUnit,:), samplingInterval=options.stepsize); % Full coherence
+        half2Coherence_rateAdjustedCoherenceConf(iUnit,:) = ... % Full coherence 95% confidence intervals
+          half2Coherence_kappaSignal(iUnit,:).*half2Coherence_kappaReference(iUnit,:).*half2Coherence.coherenceConf(iUnit,:);
       end
     end
     if options.fullCoherence
@@ -448,16 +542,16 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
       half2Coherence.rateAdjustedCoherenceConf = half2Coherence_rateAdjustedCoherenceConf;
     end
   else
-    for unit = 1:nUnits
+    for iUnit = 1:nUnits
       if strcmpi(options.typespk1,'pb') % Mean firing rates
-        [mfrFullSignal(unit), mfrHalvesSignal(unit,:)] = rateCalc(downsampledSignal(unit,:), ...
+        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc(downsampledSignal(iUnit,:), ...
           samplingInterval=options.stepsize);
       else
-        mfrFullSignal(unit) = 1;
-        mfrHalvesSignal(unit,:) = [1 1];
+        mfrFullSignal(iUnit) = 1;
+        mfrHalvesSignal(iUnit,:) = [1 1];
       end
-      [fullPSDSignal{unit}, half1PSDSignal{unit}, half2PSDSignal{unit}] = psdCalc( ...
-        downsampledSignal(unit,includeIdx), freqRange=options.freqRange, ...
+      [fullPSDSignal{iUnit}, half1PSDSignal{iUnit}, half2PSDSignal{iUnit}] = psdCalc( ...
+        downsampledSignal(iUnit,includeInds), freqRange=options.freqRange, ...
         samplingInterval=options.stepsize, typespk1=options.typespk1, ...
         winfactor=options.winfactor, freqfactor=options.freqfactor, ...
         tapers=options.tapers, decimate=options.decimate, ...
@@ -466,28 +560,28 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
         halfPSD=options.halfCoherence); % PSDs
       % Full signal
       if options.fullCoherence
-        [fullCoherence.rateAdjustedCoherence(unit,:), fullCoherence.kappaSignal(unit,:), ...
-          fullCoherence.kappaReference(unit,:)] = coherenceRateAdjustment( ...
-          mfrFullSignal(unit), mfrFullReference, fullPSDSignal{unit}.psd, fullPSDReference.psd, ...
-          fullCoherence.coherence(unit,:), samplingInterval=options.stepsize); % Full coherence
-        fullCoherence.rateAdjustedCoherenceConf(unit,:) = ... % Full coherence 95% confidence intervals
-          fullCoherence.kappaSignal(unit,:).*fullCoherence.kappaReference(unit,:).*fullCoherence.coherenceConf(unit,:);
+        [fullCoherence.rateAdjustedCoherence(iUnit,:), fullCoherence.kappaSignal(iUnit,:), ...
+          fullCoherence.kappaReference(iUnit,:)] = coherenceRateAdjustment( ...
+          mfrFullSignal(iUnit), mfrFullReference(iUnit), fullPSDSignal{iUnit}.psd, fullPSDReference{iUnit}.psd, ...
+          fullCoherence.coherence(iUnit,:), samplingInterval=options.stepsize); % Full coherence
+        fullCoherence.rateAdjustedCoherenceConf(iUnit,:) = ... % Full coherence 95% confidence intervals
+          fullCoherence.kappaSignal(iUnit,:).*fullCoherence.kappaReference(iUnit,:).*fullCoherence.coherenceConf(iUnit,:);
       end
       if options.halfCoherence
         % The first half of the signal
-        [half1Coherence.rateAdjustedCoherence(unit,:), half1Coherence.kappaSignal(unit,:), ...
-          half1Coherence.kappaReference(unit,:)] = coherenceRateAdjustment( ...
-          mfrHalvesSignal(unit,1), mfrHalvesReference(1), half1PSDSignal{unit}.psd, half1PSDReference.psd, ...
-          half1Coherence.coherence(unit,:), samplingInterval=options.stepsize); % Full coherence
-        half1Coherence.rateAdjustedCoherenceConf(unit,:) = ... % Full coherence 95% confidence intervals
-          half1Coherence.kappaSignal(unit,:).*half1Coherence.kappaReference(unit,:).*half1Coherence.coherenceConf(unit,:);
+        [half1Coherence.rateAdjustedCoherence(iUnit,:), half1Coherence.kappaSignal(iUnit,:), ...
+          half1Coherence.kappaReference(iUnit,:)] = coherenceRateAdjustment( ...
+          mfrHalvesSignal(iUnit,1), mfrHalvesReference(iUnit,1), half1PSDSignal{iUnit}.psd, half1PSDReference{iUnit}.psd, ...
+          half1Coherence.coherence(iUnit,:), samplingInterval=options.stepsize); % Full coherence
+        half1Coherence.rateAdjustedCoherenceConf(iUnit,:) = ... % Full coherence 95% confidence intervals
+          half1Coherence.kappaSignal(iUnit,:).*half1Coherence.kappaReference(iUnit,:).*half1Coherence.coherenceConf(iUnit,:);
         % The second half of the signal
-        [half2Coherence.rateAdjustedCoherence(unit,:), half2Coherence.kappaSignal(unit,:), ...
-          half2Coherence.kappaReference(unit,:)] = coherenceRateAdjustment( ...
-          mfrHalvesSignal(unit,2), mfrHalvesReference(2), half2PSDSignal{unit}.psd, half2PSDReference.psd, ...
-          half2Coherence.coherence(unit,:), samplingInterval=options.stepsize); % Full coherence
-        half2Coherence.rateAdjustedCoherenceConf(unit,:) = ... % Full coherence 95% confidence intervals
-          half2Coherence.kappaSignal(unit,:).*half2Coherence.kappaReference(unit,:).*half2Coherence.coherenceConf(unit,:);
+        [half2Coherence.rateAdjustedCoherence(iUnit,:), half2Coherence.kappaSignal(iUnit,:), ...
+          half2Coherence.kappaReference(iUnit,:)] = coherenceRateAdjustment( ...
+          mfrHalvesSignal(iUnit,2), mfrHalvesReference(iUnit,2), half2PSDSignal{iUnit}.psd, half2PSDReference{iUnit}.psd, ...
+          half2Coherence.coherence(iUnit,:), samplingInterval=options.stepsize); % Full coherence
+        half2Coherence.rateAdjustedCoherenceConf(iUnit,:) = ... % Full coherence 95% confidence intervals
+          half2Coherence.kappaSignal(iUnit,:).*half2Coherence.kappaReference(iUnit,:).*half2Coherence.coherenceConf(iUnit,:);
       end
     end
   end
@@ -1036,7 +1130,7 @@ function [mfr, mfrHalves] = rateCalc(signal, options)
 %
 % Args:
 %   signal (numeric, required, positional): a shape-(1, N) numeric array of
-%     signal spike counts or a continuous signal.
+%     signal spike counts.
 %   samplingInterval (numeric, optional, keyword): a shape-(1, 1) numeric
 %     scalar corresponding to the sampling interval in seconds
 %     (default = 0.002).
