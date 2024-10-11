@@ -207,16 +207,28 @@ end
 
 % Parse input
 if ~iscell(timesSignal)
+  if ~isvector(timesSignal)
+    error('timesSignal must be a cell array of numeric vectors or a single numeric vector');
+  end
   timesSignal = timesSignal(:)';
   timesSignal = {timesSignal};
+elseif isscalar(timesSignal) && ~isvector(timesSignal{1})
+  error('timesSignal must be a cell array of numeric vectors or a single numeric vector');
 end
+
 if ~iscell(timesReference)
+  if ~isvector(timesReference)
+    error('timesReference must be a cell array of numeric vectors or a single numeric vector');
+  end
   timesReference = timesReference(:)';
   timesReference = {timesReference};
-else
+elseif isscalar(timesReference) && ~isvector(timesReference{1})
+  error('timesReference must be a cell array of numeric vectors or a single numeric vector');
+elseif numel(timesReference) > 1
   assert(numel(timesSignal) == numel(timesReference), ...
     'The timesReference cell array has to have the same number of elements as the timesSignal cell array.')
 end
+
 if options.freqRange(end) == 0
   options.freqRange(end) = 0.5/options.stepsize;
 end
@@ -278,7 +290,7 @@ elseif numel(signalTimeBins) < numel(refTimeBins)
   end
   refTimeBins = refTimeBins(1:numel(signalTimeBins));
 end
-assert(numel(signalTimeBins) == numel(refTimeBins));
+assert(sum(signalTimeBins - refTimeBins) < 1e-3);
 
 % Find indices of times falling within intervals of interest
 [~, includeInds] = selectArrayValues(refTimeBins, options.intervals);
