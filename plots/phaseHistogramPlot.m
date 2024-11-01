@@ -48,7 +48,7 @@ end
 % Parse input
 if isempty(options.binLocs)
   phaseRange = [-pi pi];
-  binSize = (phaseRange(2) - phaseRange(1))/options.nBins;
+  binSize = (phaseRange(2) - phaseRange(1))/numel(binCounts);
   options.binLocs = phaseRange(1)+binSize/2:binSize:phaseRange(2);
 end
 
@@ -126,4 +126,5 @@ if ~isempty(options.figPath)
   savefig(fH,filename,'compact');
   title('');
   saveas(fH,filename(1:end-4),'png');
+  saveas(fH,filename(1:end-4),'pdf');
 end

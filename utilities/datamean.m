@@ -92,7 +92,7 @@ elseif strcmp(meanType, 'circular') || strcmp(meanType, 'circularNP') % circular
     if sum(dataExist)
       dataMean(j) = circmean(data(:,j));
       dataStd(j) = std(data(dataExist,j));
-      dataSEM(j) = dataStd(j) ./ counts;
+      dataSEM(j) = dataStd(j) ./ counts(j);
       if strcmp(meanType, 'circular')
         dataCI95(2,j) = circ_confmean(data(~isnan(data(:,j)),j), alpha); % parametric circular confidence intervals
       elseif strcmp(meanType, 'circularNP')

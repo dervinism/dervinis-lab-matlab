@@ -77,10 +77,10 @@ function [figH, ax1, ax2, varargout] = adjacentFigs(figPath1, figPath2, options)
 arguments
   figPath1 (1,:) {mustBeVector,mustBeText}
   figPath2 (1,:) {mustBeVector,mustBeText}
-  options.xlim1 (1,:) {mustBeNumeric,mustBeNonnegative} = []
-  options.xlim2 (1,:) {mustBeNumeric,mustBeNonnegative} = []
-  options.ylim1 (1,:) {mustBeNumeric,mustBeNonnegative} = []
-  options.ylim2 (1,:) {mustBeNumeric,mustBeNonnegative} = []
+  options.xlim1 (1,:) {mustBeNumeric} = []
+  options.xlim2 (1,:) {mustBeNumeric} = []
+  options.ylim1 (1,:) {mustBeNumeric} = []
+  options.ylim2 (1,:) {mustBeNumeric} = []
   options.legendLocation1 (1,:) {mustBeMember(options.legendLocation1,{'NorthEast','NorthWest','SouthEast','SouthWest','None'})} = 'None'
   options.legendLocation2 (1,:) {mustBeMember(options.legendLocation2,{'NorthEast','NorthWest','SouthEast','SouthWest','None'})} = 'None'
   options.colormap1 (1,:) {mustBeVector,mustBeText} = 'hsv'

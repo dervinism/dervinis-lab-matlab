@@ -40,8 +40,8 @@ function [figH, axes] = fig2liveScript(fig, options)
 
 arguments
   fig {mustBeFigureOrListedType(fig,'char')}
-  options.xlim {mustBeNumeric,mustBeNonnegative} = []
-  options.ylim {mustBeNumeric,mustBeNonnegative} = []
+  options.xlim {mustBeNumeric} = []
+  options.ylim {mustBeNumeric} = []
   options.legendLocation {mustBeMember(options.legendLocation,{'NorthEast','NorthWest','SouthEast','SouthWest','None'})} = 'None'
   options.figSize {mustBeNumeric,mustBeNonnegative} = []
   options.tight {mustBeA(options.tight,'logical')} = false
