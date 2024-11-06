@@ -16,7 +16,7 @@ function dataStruct = pkl2mat(pklFilename, options)
 %
 % Comments:
 %   Conversion may not be full. Therefore, examine the function output
-%   structure and perform  any further conversion manually.
+%   structure and perform any further conversion manually.
 %
 % Dependencies:
 %   Python
@@ -76,6 +76,25 @@ if isstruct(dataStruct) % First data layer
                 end
               end
             end
+          end
+        end
+      elseif istable(dataStruct.(fieldsL1{iFieldL1})) && ~isempty(dataStruct.(fieldsL1{iFieldL1})) % Second data layer
+        tableField = dataStruct.(fieldsL1{iFieldL1});
+        varNames = tableField.Properties.VariableNames;
+        dataTypes = varfun(@class, tableField, 'OutputFormat', 'cell');
+        for iVar = 1:numel(varNames)
+          if strcmpi(dataTypes{iVar}, 'cell')
+            varData = tableField.(varNames{iVar});
+            for iEntry = 1:numel(varData)
+              if isa(varData{iEntry}, 'py.NoneType')
+                varData{iEntry} = NaN;
+              elseif isa(varData{iEntry}, 'py.datetime.date')
+                varData{iEntry} = [num2str(double(varData{iEntry}.day)) ...
+                  '-' num2str(double(varData{iEntry}.month)) ...
+                  '-' num2str(double(varData{iEntry}.year))];
+              end
+            end
+            dataStruct.(fieldsL1{iFieldL1}).(varNames{iVar}) = varData;
           end
         end
       end

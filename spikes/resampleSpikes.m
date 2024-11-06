@@ -1,5 +1,5 @@
 function [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(spikeTimes, options)
-% [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(spikeTimes, <stepsize>)
+% [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(spikeTimes, <options>)
 %
 % Function resamples spike times series and converts it into a spike count
 % series.
@@ -40,7 +40,7 @@ resampledSpikes = zeros(1,numel(spikeTimeBins));
 
 
 %% Filling in the spike container with actual spikes
-idx = round(spikeTimes/options.stepsize) - spikeTimeBins(1)/options.stepsize + 1; % Assign bin indices to spikes
+idx = round(spikeTimes/options.stepsize) - round(spikeTimeBins(1)/options.stepsize) + 1; % Assign bin indices to spikes
 idx(idx == 0) = 1;
 [spkCounts,idx2] = groupcounts(idx'); % Count spikes within bin indices
 resampledSpikes(idx2') = spkCounts; % Mark spike presentations

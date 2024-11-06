@@ -2,7 +2,7 @@ function maxTime = getMaxSpikeTime(spikeTimes)
 % maxTime = getMaxSpikeTime(spikeTimes)
 %
 % Function picks maximum spike time from a given spike times vector. An
-% time pick is replaced by 0.
+% empty time pick is replaced by 0.
 %
 % Args:
 %   spikeTimes (numeric, required, positional): a shape-(1, N) numeric
