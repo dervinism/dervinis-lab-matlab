@@ -54,4 +54,4 @@ for s = 1:newBiggestIndex
 end
 
 % Calculate time bins
-timeBins = (1:size(resampledSpikeCounts,2)).*options.newStepsize;
+timeBins = (1:size(resampledSpikeCounts,2)).*options.newStepsize - options.newStepsize/2;
