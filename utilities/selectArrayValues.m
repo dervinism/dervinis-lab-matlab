@@ -9,7 +9,7 @@ function [reducedNumericArray, reducedNumericArrayIdx] = selectArrayValues(numer
 %     array of values. Typically, the input would be a vector of spike
 %     times.
 %   cutoffs (numeric, required, positional): a shape-(L, 2) numeric array
-%     of cutoffs for selecting cell values. L represents the number of
+%     of cutoffs for selecting array values. L represents the number of
 %     cutoff intervals, while the second dimension corresponds to the lower
 %     and the upper cutoff values. Only elements falling within these
 %     cutoff values will remain. The rest of the values will be removed.

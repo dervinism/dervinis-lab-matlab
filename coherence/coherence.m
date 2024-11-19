@@ -44,11 +44,13 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 %   typespk1 (char, optional, keyword): a shape-(1, G) character array
 %     desribing the type of the signal. Can take one of the two values:
 %       'pb' - point process (default);
-%       'c' - continuous.
+%       'c' - continuous;
+%       'pbc' - binned point process.
 %   typespk2 (char, optional, keyword): a shape-(1, G) character array
 %     desribing the type of the reference. Can take one of the two values:
 %       'pb' - point process (default);
-%       'c' - continuous.
+%       'c' - continuous;
+%       'pbc' - binned point process.
 %   winfactor (numeric, optional, keyword): a shape-(1, 1) numeric scalar.
 %     Each phase/coherence estimation window is at least this many times
 %     than 1/(highest frequency). Default is 5.
@@ -190,8 +192,8 @@ arguments
   options.startTime (1,1) {mustBeNumeric,mustBeNonnegative} = 0
   options.freqRange (1,2) {mustBeNumeric,mustBeNonnegative} = [0 0]
   options.freqGrid (1,:) {mustBeNumeric,mustBeNonnegative} = [];
-  options.typespk1 {mustBeMember(options.typespk1,{'pb','c'})} = 'pb'
-  options.typespk2 {mustBeMember(options.typespk2,{'pb','c'})} = 'pb'
+  options.typespk1 {mustBeMember(options.typespk1,{'pb','c','pbc'})} = 'pb'
+  options.typespk2 {mustBeMember(options.typespk2,{'pb','c','pbc'})} = 'pb'
   options.winfactor (1,1) {mustBeNumeric,mustBePositive} = 5
   options.freqfactor (1,1) {mustBeNumeric,mustBeGreaterThan(options.freqfactor,1)} = 2
   options.tapers (1,1) {mustBeNumeric,mustBePositive} = 3
@@ -250,6 +252,9 @@ else
   downsampledSignal = timesSignal;
   signalTimeBins = options.startTime + ...
     (1:numel(downsampledSignal{1})).*options.stepsize - options.stepsize;
+  if strcmpi(options.typespk1, 'pbc')
+    options.typespk1 = 'pb';
+  end
 end
 
 % Resample references (population rates)
@@ -266,6 +271,9 @@ else
   downsampledReference = timesReference;
   refTimeBins = options.startTime + ...
     (1:numel(downsampledReference{1})).*options.stepsize - options.stepsize;
+  if strcmpi(options.typespk2, 'pbc')
+    options.typespk2 = 'pb';
+  end
 end
 
 % Trim signals and references, if needed
@@ -562,14 +570,14 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
   else
     for iUnit = 1:nUnits
       if strcmpi(options.typespk1,'pb') % Mean firing rates
-        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc(downsampledSignal(iUnit,:), ...
+        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc(downsampledSignal{iUnit}, ...
           samplingInterval=options.stepsize);
       else
         mfrFullSignal(iUnit) = 1;
         mfrHalvesSignal(iUnit,:) = [1 1];
       end
       [fullPSDSignal{iUnit}, half1PSDSignal{iUnit}, half2PSDSignal{iUnit}] = psdCalc( ...
-        downsampledSignal(iUnit,includeInds), freqRange=options.freqRange, ...
+        downsampledSignal{iUnit}(includeInds), freqRange=options.freqRange, ...
         samplingInterval=options.stepsize, typespk1=options.typespk1, ...
         winfactor=options.winfactor, freqfactor=options.freqfactor, ...
         tapers=options.tapers, decimate=options.decimate, ...
