@@ -500,17 +500,17 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
     half2Coherence_kappaReference = zeros(nUnits,numel(half2PSDReference{1}.psd));
     half2Coherence_rateAdjustedCoherenceConf = zeros(nUnits,numel(half2PSDReference{1}.psd));
     parfor iUnit = 1:nUnits
-      if strcmpi(options.typespk1,'pb') % Mean firing rates
-        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc( ...
-          downsampledSignal(iUnit,includeInds), samplingInterval=options.stepsize); %#ok<*PFOUS>
-      else
-        mfrFullSignal(iUnit) = 1;
-        mfrHalvesSignal(iUnit,:) = [1 1];
-      end
       if iscell(downsampledSignal)
         signal = downsampledSignal{iUnit}(includeInds);
       else
         signal = downsampledSignal(iUnit,includeInds);
+      end
+      if strcmpi(options.typespk1,'pb') % Mean firing rates
+        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc( ...
+          signal, samplingInterval=options.stepsize); %#ok<*PFOUS>
+      else
+        mfrFullSignal(iUnit) = 1;
+        mfrHalvesSignal(iUnit,:) = [1 1];
       end
       [fullPSDSignal{iUnit}, half1PSDSignal{iUnit}, half2PSDSignal{iUnit}] = ...
         psdCalc(signal, freqRange=options.freqRange, ...
@@ -569,15 +569,20 @@ if options.rateAdjust && (strcmpi(options.typespk1,'pb') || strcmpi(options.type
     end
   else
     for iUnit = 1:nUnits
+      if iscell(downsampledSignal)
+        signal = downsampledSignal{iUnit}(includeInds);
+      else
+        signal = downsampledSignal(iUnit,includeInds);
+      end
       if strcmpi(options.typespk1,'pb') % Mean firing rates
-        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc(downsampledSignal{iUnit}, ...
+        [mfrFullSignal(iUnit), mfrHalvesSignal(iUnit,:)] = rateCalc(signal, ...
           samplingInterval=options.stepsize);
       else
         mfrFullSignal(iUnit) = 1;
         mfrHalvesSignal(iUnit,:) = [1 1];
       end
       [fullPSDSignal{iUnit}, half1PSDSignal{iUnit}, half2PSDSignal{iUnit}] = psdCalc( ...
-        downsampledSignal{iUnit}(includeInds), freqRange=options.freqRange, ...
+        signal, freqRange=options.freqRange, ...
         samplingInterval=options.stepsize, typespk1=options.typespk1, ...
         winfactor=options.winfactor, freqfactor=options.freqfactor, ...
         tapers=options.tapers, decimate=options.decimate, ...
