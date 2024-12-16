@@ -1,5 +1,5 @@
-function [reducedNumericArray, reducedNumericArrayIdx] = selectArrayValues(numericArray, cutoffs)
-% reducedNumericArray = selectArrayValues(numericArray, cutoffs)
+function [reducedNumericArray, reducedNumericArrayIdx] = selectArrayValues(numericArray, cutoffs, options)
+% reducedNumericArray = selectArrayValues(numericArray, cutoffs, <cutoffType>)
 %
 % function selects numeric array values within given cutoffs. It also
 % provides indices of these values.
@@ -13,6 +13,10 @@ function [reducedNumericArray, reducedNumericArrayIdx] = selectArrayValues(numer
 %     cutoff intervals, while the second dimension corresponds to the lower
 %     and the upper cutoff values. Only elements falling within these
 %     cutoff values will remain. The rest of the values will be removed.
+%   cutoffType (char, optional, keyword): a shape-(1, N) character array
+%     describing the type of cutoffs to be used:
+%     'inclusive' - includes the cutoff end values (default);
+%     'exclusive' - excludes the cutoff end values.
 %
 % Returns:
 %   reducedNumericArray (numeric): a shape-(1, M) numeric array of values
@@ -28,6 +32,7 @@ function [reducedNumericArray, reducedNumericArrayIdx] = selectArrayValues(numer
 arguments
   numericArray (:,:) {mustBeNumeric,mustBeNonempty}
   cutoffs (:,2) {mustBeNumeric}
+  options.cutoffType (1,:) {mustBeMember(options.cutoffType,{'inclusive','exclusive'})} = 'inclusive'
 end
 
 % Find indices within given cutoffs
@@ -35,8 +40,13 @@ if ~isempty(cutoffs)
   nCutoffs = size(cutoffs,1);
   reducedNumericArrayIdx = [];
   for cutoff = 1:nCutoffs
-    cutoffIdx = find(numericArray >= cutoffs(cutoff,1) ...
-      & numericArray <= cutoffs(cutoff,2));
+    if strcmpi(options.cutoffType, 'inclusive')
+      cutoffIdx = find(numericArray >= cutoffs(cutoff,1) ...
+        & numericArray <= cutoffs(cutoff,2));
+    elseif strcmpi(options.cutoffType, 'exclusive')
+      cutoffIdx = find(numericArray > cutoffs(cutoff,1) ...
+        & numericArray < cutoffs(cutoff,2));
+    end
     cutoffIdx = cutoffIdx(:)';
     reducedNumericArrayIdx = [reducedNumericArrayIdx cutoffIdx]; %#ok<*AGROW>
   end
