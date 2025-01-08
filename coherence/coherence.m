@@ -22,7 +22,7 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 %     times. Alternatively, one can supply a shape-(1, M) single numeric
 %     reference signal array (in the case where all K reference signals are
 %     the same).
-%   intervals (numeric, required, positional): a shape-(L, 2) numeric array
+%   intervals (numeric, optional, keyword): a shape-(L, 2) numeric array
 %     of time intervals. Each row corresponds to individual time intervals
 %     of interest with the first element being the start time and the
 %     second element being the end time (default = []).

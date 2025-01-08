@@ -11,6 +11,7 @@ function [resampledSpikes, spikeTimeBins, resampledSpikeTimes] = resampleSpikes(
 %     corresponding to the new sampling interval (default = 0.002).
 %   startTime (numeric, optional, keyword): a shape-(1, 1) numeric scalar
 %     corresponding to the start time bin (default = stepsize).
+%
 % Returns:
 %   resampledSpikes (numeric): a shape-(1, M) numeric array of resampled
 %     spike counts with the time bin of the same size as the input stepsize
