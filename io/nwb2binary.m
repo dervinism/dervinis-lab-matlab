@@ -88,6 +88,10 @@ function nwb2binary(inputFile, outputFile, options)
 %                   of a defined size segment and converting it into the
 %                   binary format. This is the best method for dealing with
 %                   arbitrarily large NWB files.
+%   channelGroups (numeric, optional, keyword): a shape-(f, g) numeric
+%     array of channel groups. Rows correspond tetrodes and columns
+%     correspond to individual channels. By default assumes consequtive
+%     tetrode channel pairings.
 %
 % Returns:
 %   None
@@ -116,6 +120,7 @@ arguments
   options.visualiseData (1,1) {islogical} = false
   options.dataConversionFactor (1,1) {mustBePositive} = 1
   options.conversionMode (1,:) {mustBeMember(options.conversionMode,{'full','channel','segment'})} = 'full'
+  options.channelGroups (:,:) {mustBePositive} = [1:4; 5:8; 9:12; 13:16; 17:20; 21:24; 25:28; 29:32];
 end
 
 % Parse input
@@ -142,7 +147,7 @@ if strcmpi(options.conversionMode, 'segment')
     dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
     % Convert each segment of a timeseries group
     nSegments = ceil(size(dataContainer.data,2)/segmentSize);
-    for iSegment = 1:nSegments
+    for iSegment = 1:1 %nSegments
       segmentInds = (1:segmentSize) + (iSegment-1)*segmentSize;
       segmentInds(segmentInds > size(dataContainer.data,2)) = [];
       timeseriesData = dataContainer.data(:,segmentInds);
@@ -270,42 +275,47 @@ if strcmpi(options.conversionMode, 'segment')
         elseif strcmpi(options.removeArtifacts, 'amp')
           baseline = 0;
           for iChan = 1:nChans
-            stimMask = false(1,size(timeseriesData,2));
-            stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
-            stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+            if ismember(iChan, options.channelGroups(:,1))
+              stimMask = false(1,size(timeseriesData,2));
+            end
             absTimeseriesSmooth = smooth(abs(timeseriesData(iChan,:)), round(samplingRate/10));
             baselineSmooth = median(absTimeseriesSmooth);
             stimMask(absTimeseriesSmooth >= baselineSmooth*2) = true;
-            for iShift = 1:20
-              if iShift > 20
-                stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-              else
-                stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-                  [false(1,iShift) stimMask(1:end-iShift)]);
+            stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
+            stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+            chanGroupMask = ismember(options.channelGroups(:,end), iChan);
+            if any(chanGroupMask)
+              for iShift = 1:20
+                if iShift > 20
+                  stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
+                else
+                  stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
+                    [false(1,iShift) stimMask(1:end-iShift)]);
+                end
               end
-            end
-            diffStimMask = [0 diff(stimMask)];
-            onsets = find(diffStimMask > 0);
-            offsets = find(diffStimMask < 0);
-            if onsets(1) > offsets(1)
-              onsets = [1 onsets]; %#ok<*AGROW>
-            end
-            if offsets(end) < onsets(end)
-              offsets = [offsets numel(stimMask)];
-            end
-            assert(numel(onsets) == numel(offsets));
-            durations = (offsets-onsets)./samplingRate;
-            for iDuration = 1:numel(durations)
-              if durations(iDuration) >= 1
-                stimMask(max([1 onsets(iDuration) - round(0.1*samplingRate)]): ...
-                  min([offsets(iDuration) + round(0.1*samplingRate) numel(stimMask)])) = true;
+              diffStimMask = [0 diff(stimMask)];
+              onsets = find(diffStimMask > 0);
+              offsets = find(diffStimMask < 0);
+              if onsets(1) > offsets(1)
+                onsets = [1 onsets]; %#ok<*AGROW>
               end
-            end
-            if any(stimMask)
-              %figure;
-              %plot(timeseriesData./max(timeseriesData(iChan,:)));
-              %hold on; plot(stimMask); hold off
-              timeseriesData(iChan,stimMask) = baseline;
+              if offsets(end) < onsets(end)
+                offsets = [offsets numel(stimMask)];
+              end
+              assert(numel(onsets) == numel(offsets));
+              durations = (offsets-onsets)./samplingRate;
+              for iDuration = 1:numel(durations)
+                if durations(iDuration) >= 1
+                  stimMask(max([1 onsets(iDuration) - round(0.1*samplingRate)]): ...
+                    min([offsets(iDuration) + round(0.1*samplingRate) numel(stimMask)])) = true;
+                end
+              end
+              if any(stimMask)
+                %figure;
+                %plot(timeseriesData./max(timeseriesData(iChan,:)));
+                %hold on; plot(stimMask); hold off
+                timeseriesData(options.channelGroups(chanGroupMask,:),stimMask) = baseline;
+              end
             end
           end
         end
