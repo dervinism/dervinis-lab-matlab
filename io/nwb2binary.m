@@ -73,21 +73,10 @@ function nwb2binary(inputFile, outputFile, options)
 %   dataConversionFactor (numeric, optional, keyword): a shape-(1, 1)
 %     numeric scalar used to multiple data to convert it into appropriate
 %     precision format (default=32000).
-%   conversionMode (char, optional, keyword): a shape-(1, i) character
-%     array describing the method of binary conversion. Available options
-%     include:
-%       'full' - loading full data matrix from NWB and converting it into
-%                binary (default). This is the best approach in converting
-%                small NWB files;
-%       'channel' - loading a single data matrix row (channel) from the NWB
-%                   file, processing it, and storing it in a data container
-%                   in an integer format before all channels are loaded and
-%                   processed, and finally saving them in the binary format.
-%                   This approach works with intermediate size files;
-%       'segment' - iteratively loading all channels of the data matrix but
-%                   of a defined size segment and converting it into the
-%                   binary format. This is the best method for dealing with
-%                   arbitrarily large NWB files.
+%   car (logical, optional, keyword): a shape-(1, 1) logical scalar
+%     controlling the application of the common average reference (CAR).
+%     Referencing is applied on a per lead basis described in
+%     channelGroups (default=false).
 %   channelGroups (numeric, optional, keyword): a shape-(f, g) numeric
 %     array of channel groups. Rows correspond tetrodes and columns
 %     correspond to individual channels. By default assumes consequtive
@@ -119,7 +108,7 @@ arguments
   options.zeroPeriods (:,:) {mustBeNumeric} = []
   options.visualiseData (1,1) {islogical} = false
   options.dataConversionFactor (1,1) {mustBePositive} = 1
-  options.conversionMode (1,:) {mustBeMember(options.conversionMode,{'full','channel','segment'})} = 'full'
+  options.car (1,1) {islogical} = false
   options.channelGroups (:,:) {mustBePositive} = [1:4; 5:8; 9:12; 13:16; 17:20; 21:24; 25:28; 29:32];
 end
 
@@ -129,7 +118,12 @@ if ~isempty(options.timeseriesGroup) && ischar(options.timeseriesGroup)
 end
 
 % Parameters
-segmentSize = 1e8; % samples. 1875 seconds for 32kHz sampling frequency
+options.segmentSize = 1e8; % samples. 1875 seconds for 32kHz sampling frequency
+options.absAmpSmoothCutoffFactor = 1.15; % baseline factor
+options.artifactExpandSamples = 20; % samples
+options.artifactForwardExpandSamples = 20; % samples
+options.largeArtifactExpandTime = 0.05; % seconds
+options.baselinePrctile = 25; % percentile
 
 % Load NWB file
 nwbData = nwbRead(inputFile);
@@ -140,510 +134,24 @@ if isempty(options.timeseriesGroup)
   options.timeseriesGroup = timeseriesGroups;
 end
 
-if strcmpi(options.conversionMode, 'segment')
-  % Convert each timeseries group
-  nGroups = numel(options.timeseriesGroup);
-  for iGroup = 1:nGroups
-    dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
-    % Convert each segment of a timeseries group
-    nSegments = ceil(size(dataContainer.data,2)/segmentSize);
-    for iSegment = 1:1 %nSegments
-      segmentInds = (1:segmentSize) + (iSegment-1)*segmentSize;
-      segmentInds(segmentInds > size(dataContainer.data,2)) = [];
-      timeseriesData = dataContainer.data(:,segmentInds);
-      samplingRate = dataContainer.starting_time_rate;
-      if isempty(samplingRate)
-        timestamps = dataContainer.timestamps(segmentInds)';
-        timestamps = timestamps - dataContainer.timestamps(1);
-        samplingRate = 1/median(diff(timestamps));
-      else
-        timestamps = segmentInds./samplingRate;
-      end
-
-      % Convert to double
-      if isfloat(timeseriesData)
-        warning(['Timeseries data type is float. This is likely an error that ' ...
-          'will result in incorrect binary data conversion. Or you may need ' ...
-          'to provide appropriate dataConversionFactor.']);
-      end
-      dataType = class(timeseriesData);
-      timeseriesData = double(timeseriesData);
-      timeseriesData = timeseriesData.*options.dataConversionFactor;
-
-      % Filter data
-      SD_prior = mean(std(timeseriesData,[],2));
-      if strcmpi(options.filter, 'bandpass_prior')
-        timeseriesData = bandpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyRange=[options.lowCutoffFreq options.highCutoffFreq]);
-      elseif strcmpi(options.filter, 'lowpass_prior')
-        timeseriesData = lowpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyCutoff=options.lowCutoffFreq);
-      elseif strcmpi(options.filter, 'highpass_prior')
-        timeseriesData = highpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyCutoff=options.highCutoffFreq);
-      end
-      SD_post = mean(std(timeseriesData,[],2));
-      timeseriesData = timeseriesData.*(SD_prior/SD_post);
-
-      % Visualise data
-      nChans = size(timeseriesData,1);
-      if options.visualiseData
-        for iChan = 1:nChans
-          figure; plot(timestamps, timeseriesData(iChan,:));
-          %figure; MTSpectrogram(timeseriesData(iChan,:)', ...
-          %  'frequency',samplingRate, 'show','on');
-        end
-      end
-
-      % Zero out stimulation data (or artifacts)
-      stimGroupMask = contains(timeseriesGroups, 'Stim'); %#ok<*NASGU>
-      if ~strcmpi(options.removeArtifacts, 'none')
-        if strcmpi(options.removeArtifacts, 'stim')
-          if sum(stimGroupMask) %#ok<*UNRCH>
-            stimGroupName = timeseriesGroups{stimGroupMask};
-            dataContainer = nwbData.acquisition.get(stimGroupName);
-            stimTimeseriesData = dataContainer.data(:,:);
-            thr = min(max(stimTimeseriesData,[],2))/4;
-            stimMask = false(size(stimTimeseriesData));
-            stimMask(stimTimeseriesData >= thr) = true;
-            stimMask = sum(stimMask);
-            stimMask = logical([stimMask(2:end) false] + [false stimMask(1:end-1)]);
-            stimSamplingRate = dataContainer.starting_time_rate;
-            if isempty(stimSamplingRate)
-              stimTimestamps = dataContainer.timestamps(:)';
-              stimSamplingRate = 1/median(diff(stimTimestamps));
-            end
-            if any(stimMask)
-              for iChan = 1:nChans
-                timeseriesData(iChan,stimMask) = median(timeseriesData(iChan,:));
-              end
-            end
-          end
-        elseif strcmpi(options.removeArtifacts, 'recNormThr')
-          for iChan = 1:nChans
-            baseline = median(timeseriesData(iChan,:));
-            if strcmpi(options.filter, 'none') || ~strcmpi(options.filter, 'bandpass_prior')
-              absTimeseries = abs(bandpassFilterTimeSeries(double(timeseriesData(iChan,:)), ...
-                sampleRate=samplingRate, frequencyRange=[1 9500]));
-            else
-              absTimeseries = abs(timeseriesData(iChan,:));
-            end
-            stimMask = absTimeseries./max(absTimeseries);
-            thr = options.artifactCutoff;
-            stimMask(stimMask >= thr) = 1;
-            stimMask(stimMask < thr) = 0;
-            stimMask = logical(stimMask);
-            for iShift = 1:20
-              if iShift > 20
-                stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-              else
-                stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-                  [false(1,iShift) stimMask(1:end-iShift)]);
-              end
-            end
-            if any(stimMask)
-              %figure;
-              %plot(timeseriesData(iChan,:)./max(timeseriesData(iChan,:)));
-              %hold on; plot(stimMask); hold off
-              timeseriesData(iChan,stimMask) = baseline;
-            end
-          end
-        elseif strcmpi(options.removeArtifacts, 'recAbsThr')
-          baseline = 0;
-          for iChan = 1:nChans
-            stimMask = false(1,size(timeseriesData,2));
-            stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
-            stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
-            for iShift = 1:20
-              if iShift > 20
-                stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-              else
-                stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-                  [false(1,iShift) stimMask(1:end-iShift)]);
-              end
-            end
-            if any(stimMask)
-              %figure;
-              %plot(timeseriesData./max(timeseriesData(iChan,:)));
-              %hold on; plot(stimMask); hold off
-              timeseriesData(iChan,stimMask) = baseline;
-            end
-          end
-        elseif strcmpi(options.removeArtifacts, 'amp')
-          baseline = 0;
-          for iChan = 1:nChans
-            if ismember(iChan, options.channelGroups(:,1))
-              stimMask = false(1,size(timeseriesData,2));
-            end
-            absTimeseriesSmooth = smooth(abs(timeseriesData(iChan,:)), round(samplingRate/10));
-            baselineSmooth = median(absTimeseriesSmooth);
-            stimMask(absTimeseriesSmooth >= baselineSmooth*2) = true;
-            stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
-            stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
-            chanGroupMask = ismember(options.channelGroups(:,end), iChan);
-            if any(chanGroupMask)
-              for iShift = 1:20
-                if iShift > 20
-                  stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-                else
-                  stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-                    [false(1,iShift) stimMask(1:end-iShift)]);
-                end
-              end
-              diffStimMask = [0 diff(stimMask)];
-              onsets = find(diffStimMask > 0);
-              offsets = find(diffStimMask < 0);
-              if onsets(1) > offsets(1)
-                onsets = [1 onsets]; %#ok<*AGROW>
-              end
-              if offsets(end) < onsets(end)
-                offsets = [offsets numel(stimMask)];
-              end
-              assert(numel(onsets) == numel(offsets));
-              durations = (offsets-onsets)./samplingRate;
-              for iDuration = 1:numel(durations)
-                if durations(iDuration) >= 1
-                  stimMask(max([1 onsets(iDuration) - round(0.1*samplingRate)]): ...
-                    min([offsets(iDuration) + round(0.1*samplingRate) numel(stimMask)])) = true;
-                end
-              end
-              if any(stimMask)
-                %figure;
-                %plot(timeseriesData./max(timeseriesData(iChan,:)));
-                %hold on; plot(stimMask); hold off
-                timeseriesData(options.channelGroups(chanGroupMask,:),stimMask) = baseline;
-              end
-            end
-          end
-        end
-      end
-
-      % Zero out time periods of choice
-      if ~isempty(options.zeroPeriods)
-        nPeriods = size(options.zeroPeriods,1);
-        for iPeriod = 1:nPeriods
-          if ~options.zeroPeriods(iPeriod,2)
-            inds(1) = 1;
-          else
-            inds(1) = find(timestamps - options.zeroPeriods(iPeriod,2) > 0, 1);
-          end
-          if isinf(options.zeroPeriods(iPeriod,3))
-            inds(2) = inf;
-          else
-            inds(2) = find(timestamps - options.zeroPeriods(iPeriod,3) > 0, 1);
-          end
-          if options.zeroPeriods(iPeriod,1)
-            if isinf(inds(2))
-              timeseriesData(options.zeroPeriods(iPeriod,1),inds(1):end) = ...
-                median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
-            else
-              timeseriesData(options.zeroPeriods(iPeriod,1),inds(1):inds(2)) = ...
-                median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
-            end
-          else
-            for iChan = 1:nChans
-              if isinf(inds(2))
-                timeseriesData(iChan,inds(1):end) = median(timeseriesData(iChan,:));
-              else
-                timeseriesData(iChan,inds(1):inds(2)) = median(timeseriesData(iChan,:));
-              end
-            end
-          end
-        end
-      end
-
-      % Filter data
-      SD_prior = mean(std(timeseriesData,[],2));
-      if strcmpi(options.filter, 'bandpass_post')
-        timeseriesData = bandpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyRange=[options.lowCutoffFreq options.highCutoffFreq]);
-      elseif strcmpi(options.filter, 'lowpass_post')
-        timeseriesData = lowpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyCutoff=options.lowCutoffFreq);
-      elseif strcmpi(options.filter, 'highpass_post')
-        timeseriesData = highpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyCutoff=options.highCutoffFreq);
-      end
-      SD_post = mean(std(timeseriesData,[],2));
-      timeseriesData = timeseriesData.*(SD_prior/SD_post);
-
-      % Visualise data
-      if options.visualiseData
-        for iChan = 1:nChans
-          figure; plot(timestamps, timeseriesData(iChan,:));
-          %figure; MTSpectrogram(timeseriesData(iChan,:)', ...
-          %  'frequency',samplingRate, 'show','on');
-        end
-      end
-
-      % Save the binary file
-      [~,~,ext] = fileparts(outputFile);
-      outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} ext];
-      if strcmpi(dataType, options.precision) || ~isempty(options.precision)
-        timeseriesData = cast(timeseriesData, options.precision);
-      else
-        timeseriesData = cast(timeseriesData, dataType);
-      end
-      if iSegment == 1
-        fid = fopen(outputFile_group, 'w');
-      else
-        fid = fopen(outputFile_group, 'ab');
-      end
-      fwrite(fid, timeseriesData, options.precision);
-      if iSegment == nSegments
-        fclose(fid);
-      end
-    end
-  end
-
-
-
-
-
-elseif strcmpi(options.conversionMode, 'channel')
-
-  % Convert each timeseries group
-  nGroups = numel(options.timeseriesGroup);
-  for iGroup = 1:nGroups
-    dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
-    nChans = size(dataContainer.data,1);
+% Convert each timeseries group
+nGroups = numel(options.timeseriesGroup);
+for iGroup = 1:nGroups
+  dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
+  % Convert each segment of a timeseries group
+  nSegments = ceil(size(dataContainer.data,2)/options.segmentSize);
+  for iSegment = 1:nSegments
+    disp(['Segment ' num2str(iSegment) '/' num2str(nSegments)]);
+    segmentInds = (1:options.segmentSize) + (iSegment-1)*options.segmentSize;
+    segmentInds(segmentInds > size(dataContainer.data,2)) = [];
+    timeseriesData = dataContainer.data(:,segmentInds);
     samplingRate = dataContainer.starting_time_rate;
     if isempty(samplingRate)
-      timestamps = dataContainer.timestamps(:)';
-      timestamps = timestamps - timestamps(1);
+      timestamps = dataContainer.timestamps(segmentInds)';
+      timestamps = timestamps - dataContainer.timestamps(1);
       samplingRate = 1/median(diff(timestamps));
     else
-      timestamps = (1:size(dataContainer.data,2))./samplingRate;
-    end
-
-    % Convert channel by channel
-    timeseriesData2write = zeros(size(dataContainer.data), 'int32');
-    for iChan = 1:nChans
-      timeseriesData = dataContainer.data(iChan,:);
-
-      % Convert to double
-      if isfloat(timeseriesData)
-        warning(['Timeseries data type is float. This is likely an error that ' ...
-          'will result in incorrect binary data conversion. Or you may need ' ...
-          'to provide appropriate dataConversionFactor.']);
-      end
-      dataType = class(timeseriesData);
-      timeseriesData = double(timeseriesData);
-      timeseriesData = timeseriesData.*options.dataConversionFactor;
-
-      % Filter data
-      SD_prior = std(timeseriesData);
-      if strcmpi(options.filter, 'bandpass_prior')
-        timeseriesData = bandpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyRange=[options.lowCutoffFreq options.highCutoffFreq]);
-      elseif strcmpi(options.filter, 'lowpass_prior')
-        timeseriesData = lowpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyCutoff=options.lowCutoffFreq);
-      elseif strcmpi(options.filter, 'highpass_prior')
-        timeseriesData = highpassFilterTimeSeries(timeseriesData, ...
-          sampleRate=samplingRate, ...
-          frequencyCutoff=options.highCutoffFreq);
-      end
-      SD_post = std(timeseriesData);
-      timeseriesData = timeseriesData.*(SD_prior/SD_post);
-
-      % Visualise data
-      if options.visualiseData
-        %figure; plot(timestamps, timeseriesData);
-        %figure; MTSpectrogram(double(timeseriesData'), ...
-        %  'frequency',samplingRate, 'show','on');
-      end
-
-      % Zero out stimulation data (or artifacts)
-      stimGroupMask = contains(timeseriesGroups, 'Stim'); %#ok<*NASGU>
-      if strcmpi(options.removeArtifacts, 'recNormThr')
-        baseline = median(timeseriesData);
-        if strcmpi(options.filter, 'none') || ~strcmpi(options.filter, 'bandpass_prior')
-          absTimeseries = abs(bandpassFilterTimeSeries(timeseriesData, ...
-            sampleRate=samplingRate, frequencyRange=[1 9500]));
-        else
-          absTimeseries = abs(timeseriesData);
-        end
-        stimMask = absTimeseries./max(absTimeseries);
-        thr = options.artifactCutoff;
-        stimMask(stimMask >= thr) = 1;
-        stimMask(stimMask < thr) = 0;
-        stimMask = logical(stimMask);
-        for iShift = 1:20
-          if iShift > 20
-            stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-          else
-            stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-              [false(1,iShift) stimMask(1:end-iShift)]);
-          end
-        end
-        if any(stimMask)
-          %figure;
-          %plot(timeseriesData./max(timeseriesData));
-          %hold on; plot(stimMask); hold off
-          timeseriesData(stimMask) = baseline;
-        end
-      elseif strcmpi(options.removeArtifacts, 'recAbsThr')
-        baseline = 0;
-        stimMask = false(size(timeseriesData));
-        stimMask(timeseriesData >= options.artifactCutoff(1)) = true;
-        stimMask(timeseriesData <= options.artifactCutoff(2)) = true;
-        for iShift = 1:20
-          if iShift > 20
-            stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-          else
-            stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-              [false(1,iShift) stimMask(1:end-iShift)]);
-          end
-        end
-        if any(stimMask)
-          %figure;
-          %plot(timeseriesData./max(timeseriesData));
-          %hold on; plot(stimMask); hold off
-          timeseriesData(stimMask) = baseline;
-        end
-      elseif strcmpi(options.removeArtifacts, 'amp')
-        baseline = 0;
-        stimMask = false(size(timeseriesData));
-        stimMask(timeseriesData >= options.artifactCutoff(1)) = true;
-        stimMask(timeseriesData <= options.artifactCutoff(2)) = true;
-        absTimeseriesSmooth = smooth(abs(timeseriesData), round(samplingRate/10));
-        baselineSmooth = median(absTimeseriesSmooth);
-        stimMask(absTimeseriesSmooth >= baselineSmooth*2) = true;
-        for iShift = 1:20
-          if iShift > 20
-            stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
-          else
-            stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
-              [false(1,iShift) stimMask(1:end-iShift)]);
-          end
-        end
-        diffStimMask = [0 diff(stimMask)];
-        onsets = find(diffStimMask > 0);
-        offsets = find(diffStimMask < 0);
-        if onsets(1) > offsets(1)
-          onsets = [1 onsets]; %#ok<*AGROW>
-        end
-        if offsets(end) < onsets(end)
-          offsets = [offsets numel(stimMask)];
-        end
-        assert(numel(onsets) == numel(offsets));
-        durations = (offsets-onsets)./samplingRate;
-        for iDuration = 1:numel(durations)
-          if durations(iDuration) >= 1
-            stimMask(max([1 onsets(iDuration) - round(0.1*samplingRate)]): ...
-              min([offsets(iDuration) + round(0.1*samplingRate) numel(stimMask)])) = true;
-          end
-        end
-        if any(stimMask)
-          %figure;
-          %plot(timeseriesData./max(timeseriesData));
-          %hold on; plot(stimMask); hold off
-          timeseriesData(stimMask) = baseline;
-        end
-      end
-      clear stimMask diffStimMask absTimeseries absTimeseriesSmooth onsets
-      clear offsets durations SD_post SD_prior baseline baselineSmooth
-      clear iDuration iShift
-
-      % Zero out time periods of choice
-      if ~isempty(options.zeroPeriods)
-        nPeriods = size(options.zeroPeriods,1);
-        for iPeriod = 1:nPeriods
-          if options.zeroPeriods(iPeriod,1) == iChan || ~options.zeroPeriods(iPeriod,1)
-            if ~options.zeroPeriods(iPeriod,2)
-              inds(1) = 1;
-            else
-              inds(1) = find(timestamps - options.zeroPeriods(iPeriod,2) > 0, 1);
-            end
-            if isinf(options.zeroPeriods(iPeriod,3))
-              inds(2) = inf;
-            else
-              inds(2) = find(timestamps - options.zeroPeriods(iPeriod,3) > 0, 1);
-            end
-            if isinf(inds(2))
-              timeseriesData(inds(1):end) = ...
-                median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
-            else
-              timeseriesData(inds(1):inds(2)) = ...
-                median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
-            end
-          end
-        end
-      end
-
-      % Filter data
-      if strcmpi(options.filter, 'bandpass_post') || ...
-          strcmpi(options.filter, 'lowpass_post') || ...
-          strcmpi(options.filter, 'highpass_post')
-        SD_prior = std(timeseriesData);
-        if strcmpi(options.filter, 'bandpass_post')
-          timeseriesData = bandpassFilterTimeSeries(timeseriesData, ...
-            sampleRate=samplingRate, ...
-            frequencyRange=[options.lowCutoffFreq options.highCutoffFreq]);
-        elseif strcmpi(options.filter, 'lowpass_post')
-          timeseriesData = lowpassFilterTimeSeries(timeseriesData, ...
-            sampleRate=samplingRate, ...
-            frequencyCutoff=options.lowCutoffFreq);
-        elseif strcmpi(options.filter, 'highpass_post')
-          timeseriesData = highpassFilterTimeSeries(timeseriesData, ...
-            sampleRate=samplingRate, ...
-            frequencyCutoff=options.highCutoffFreq);
-        end
-        SD_post = mean(std(timeseriesData,[],2));
-        timeseriesData = timeseriesData.*(SD_prior/SD_post);
-      end
-
-      % Visualise data
-      if options.visualiseData
-        figure; plot(timestamps, timeseriesData);
-        %figure; MTSpectrogram(timeseriesData', ...
-        %  'frequency',samplingRate, 'show','on');
-      end
-
-      % Save the channel MAT file
-      outputFile_ch = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} '_' num2str(iChan) '.mat'];
-      timeseriesData = cast(timeseriesData, dataType);
-      if ~isempty(options.precision)
-        timeseriesData2write(iChan,:) = cast(timeseriesData, options.precision);
-      else
-        timeseriesData2write(iChan,:) = timeseriesData;
-      end
-      %save(outputFile_ch, 'timeseriesData', '-v7.3');
-    end
-
-    % Save the binary file
-    [~,~,ext] = fileparts(outputFile);
-    outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} ext];
-    writeBinary(timeseriesData, outputFile_group, writeBufferSize=options.writeBufferSize);
-  end
-
-
-
-
-
-elseif strcmpi(options.conversionMode, 'full')
-
-  % Convert each timeseries group
-  nGroups = numel(options.timeseriesGroup);
-  for iGroup = 1:nGroups
-    dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
-    timeseriesData = dataContainer.data(:,:);
-    samplingRate = dataContainer.starting_time_rate;
-    if isempty(samplingRate)
-      timestamps = dataContainer.timestamps(:)';
-      timestamps = timestamps - timestamps(1);
-      samplingRate = 1/median(diff(timestamps));
-    else
-      timestamps = (1:size(timeseriesData,2))./samplingRate;
+      timestamps = segmentInds./samplingRate;
     end
 
     % Convert to double
@@ -674,8 +182,31 @@ elseif strcmpi(options.conversionMode, 'full')
     SD_post = mean(std(timeseriesData,[],2));
     timeseriesData = timeseriesData.*(SD_prior/SD_post);
 
-    % Visualise data
+    % Subtract CAR
     nChans = size(timeseriesData,1);
+    options.channelGroups(nChans/4+1:end,:) = [];
+    if options.car
+      if size(options.channelGroups,1) == 2
+        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:)];
+      elseif size(options.channelGroups,1) == 4
+        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
+                      options.channelGroups(3,:) options.channelGroups(4,:)];
+      elseif size(options.channelGroups,1) == 6
+        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
+                      options.channelGroups(3,:) options.channelGroups(4,:); ...
+                      options.channelGroups(5,:) options.channelGroups(6,:)];
+      end
+      for iTetrode = 1:size(leadGroups,1)
+        medianChannel = median(timeseriesData(leadGroups(iTetrode,:),:), 2);
+        timeseriesData(leadGroups(iTetrode,:),:) = bsxfun( ...
+          @minus, timeseriesData(leadGroups(iTetrode,:),:), medianChannel);
+        medianTrace = median(timeseriesData(leadGroups(iTetrode,:),:), 1);
+        timeseriesData(leadGroups(iTetrode,:),:) = bsxfun( ...
+          @minus, timeseriesData(leadGroups(iTetrode,:),:), medianTrace);
+      end
+    end
+
+    % Visualise data
     if options.visualiseData
       for iChan = 1:nChans
         figure; plot(timestamps, timeseriesData(iChan,:));
@@ -722,8 +253,8 @@ elseif strcmpi(options.conversionMode, 'full')
           stimMask(stimMask >= thr) = 1;
           stimMask(stimMask < thr) = 0;
           stimMask = logical(stimMask);
-          for iShift = 1:20
-            if iShift > 20
+          for iShift = 1:options.artifactExpandSamples
+            if iShift > options.artifactForwardExpandSamples
               stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
             else
               stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
@@ -735,6 +266,73 @@ elseif strcmpi(options.conversionMode, 'full')
             %plot(timeseriesData(iChan,:)./max(timeseriesData(iChan,:)));
             %hold on; plot(stimMask); hold off
             timeseriesData(iChan,stimMask) = baseline;
+          end
+        end
+      elseif strcmpi(options.removeArtifacts, 'recAbsThr')
+        baseline = 0;
+        for iChan = 1:nChans
+          stimMask = false(1,size(timeseriesData,2));
+          stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
+          stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+          for iShift = 1:options.artifactExpandSamples
+            if iShift > options.artifactForwardExpandSamples
+              stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
+            else
+              stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
+                [false(1,iShift) stimMask(1:end-iShift)]);
+            end
+          end
+          if any(stimMask)
+            %figure;
+            %plot(timeseriesData./max(timeseriesData(iChan,:)));
+            %hold on; plot(stimMask); hold off
+            timeseriesData(iChan,stimMask) = baseline;
+          end
+        end
+      elseif strcmpi(options.removeArtifacts, 'amp')
+        baseline = 0;
+        for iChan = 1:nChans
+          if ismember(iChan, options.channelGroups(:,1))
+            stimMask = false(1,size(timeseriesData,2));
+          end
+          absTimeseriesSmooth = smooth(abs(timeseriesData(iChan,:)), round(samplingRate/1));
+          baselineSmooth = prctile(absTimeseriesSmooth, options.baselinePrctile);
+          stimMask(absTimeseriesSmooth >= baselineSmooth*options.absAmpSmoothCutoffFactor) = true;
+          stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
+          stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+          chanGroupMask = ismember(options.channelGroups(:,end), iChan);
+          if any(chanGroupMask)
+            for iShift = 1:options.artifactExpandSamples
+              if iShift > options.artifactForwardExpandSamples
+                stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
+              else
+                stimMask = logical([stimMask(1+iShift:end) false(1,iShift)] + ...
+                  [false(1,iShift) stimMask(1:end-iShift)]);
+              end
+            end
+            diffStimMask = [0 diff(stimMask)];
+            onsets = find(diffStimMask > 0);
+            offsets = find(diffStimMask < 0);
+            if onsets(1) > offsets(1)
+              onsets = [1 onsets]; %#ok<*AGROW>
+            end
+            if offsets(end) < onsets(end)
+              offsets = [offsets numel(stimMask)];
+            end
+            assert(numel(onsets) == numel(offsets));
+            durations = (offsets-onsets)./samplingRate;
+            for iDuration = 1:numel(durations)
+              if durations(iDuration) >= 1
+                stimMask(max([1 onsets(iDuration) - round(options.largeArtifactExpandTime*samplingRate)]): ...
+                  min([offsets(iDuration) + round(options.largeArtifactExpandTime*samplingRate) numel(stimMask)])) = true;
+              end
+            end
+            if any(stimMask)
+              %figure;
+              %plot(timeseriesData./max(timeseriesData(iChan,:)));
+              %hold on; plot(stimMask); hold off
+              timeseriesData(options.channelGroups(chanGroupMask,:),stimMask) = baseline;
+            end
           end
         end
       end
@@ -804,12 +402,19 @@ elseif strcmpi(options.conversionMode, 'full')
     % Save the binary file
     [~,~,ext] = fileparts(outputFile);
     outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} ext];
-    timeseriesData = cast(timeseriesData, dataType);
-    if isempty(options.precision)
-      writeBinary(timeseriesData, outputFile_group, writeBufferSize=options.writeBufferSize);
+    if strcmpi(dataType, options.precision) || ~isempty(options.precision)
+      timeseriesData = cast(timeseriesData, options.precision);
     else
-      writeBinary(cast(timeseriesData, options.precision), ...
-        outputFile_group, writeBufferSize=options.writeBufferSize);
+      timeseriesData = cast(timeseriesData, dataType);
+    end
+    if iSegment == 1
+      fid = fopen(outputFile_group, 'w');
+    else
+      fid = fopen(outputFile_group, 'ab');
+    end
+    fwrite(fid, timeseriesData, options.precision);
+    if iSegment == nSegments
+      fclose(fid);
     end
   end
 end

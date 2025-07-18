@@ -48,7 +48,7 @@ cd(phyFolder);
 
 % Convert to CellExplorer path naming convention
 basepath = phyFolder;
-[~, basename] = fileparts(binaryFile);
+[~, basename, ext] = fileparts(binaryFile);
 
 % Create the session file and save it
 session = sessionTemplate(basepath);
@@ -61,15 +61,29 @@ session.animal.species = 'human';
 session.extracellular.sr = options.samplingRate;
 session.extracellular.srLfp = options.samplingRate;
 session.extracellular.nChannels = options.nChannels;
-session.extracellular.fileName = binaryFile;
+session.extracellular.fileName = [basename ext];
 session.extracellular.precision = options.precision;
 
 save(fullfile(session.general.basepath, ...
   [session.general.name, '.session.mat']), 'session');
 
 % Run the Phy to CellExplorer pipeline
-loadSpikes('basepath',basepath, 'basename',basename, ...
-  'labelsToRead',{'good','mua'}, 'forceReload',true, 'showWaveforms',false);
+unitSpikes = loadSpikes('basepath',basepath, 'basename',basename, ...
+  'labelsToRead',{'good'}, 'forceReload',true, 'showWaveforms',false, ...
+  'session',session);
+spikes = loadSpikes('basepath',basepath, 'basename',basename, ...
+  'labelsToRead',{'good','mua'}, 'forceReload',true, 'showWaveforms',false, ...
+  'session',session);
+unitMask = ismember(spikes.cluID, unitSpikes.cluID);
+spikes.labels = cell(1, spikes.numcells);
+for iUnit = 1:spikes.numcells
+  if unitMask(iUnit)
+    spikes.labels{iUnit} = 'unit';
+  else
+    spikes.labels{iUnit} = 'mua';
+  end
+end
+save([spikes.basename '.spikes.cellinfo.mat'], 'spikes');
 
 % Move pipeline output files to a dedicated folder
 if ~strcmpi(phyFolder, outputFolder)
