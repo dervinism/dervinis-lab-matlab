@@ -186,7 +186,9 @@ for iGroup = 1:nGroups
     nChans = size(timeseriesData,1);
     options.channelGroups(nChans/4+1:end,:) = [];
     if options.car
-      if size(options.channelGroups,1) == 2
+      if size(options.channelGroups,1) == 1
+        leadGroups = options.channelGroups(1,:);
+      elseif size(options.channelGroups,1) == 2
         leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:)];
       elseif size(options.channelGroups,1) == 4
         leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
