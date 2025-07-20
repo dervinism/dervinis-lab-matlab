@@ -262,9 +262,11 @@ for iGroup = 1:nGroups
             absTimeseries = abs(timeseriesData(iChan,:));
           end
           stimMask = absTimeseries./max(absTimeseries);
-          thr = options.artifactCutoff;
-          stimMask(stimMask >= thr) = 1;
-          stimMask(stimMask < thr) = 0;
+          if ~isempty(options.artifactCutoff)
+            thr = options.artifactCutoff;
+            stimMask(stimMask >= thr) = 1;
+            stimMask(stimMask < thr) = 0;
+          end
           stimMask = logical(stimMask);
           for iShift = 1:options.artifactExpandSamples
             if iShift > options.artifactForwardExpandSamples
@@ -285,8 +287,10 @@ for iGroup = 1:nGroups
         baseline = 0;
         for iChan = 1:nChans
           stimMask = false(1,size(timeseriesData,2));
-          stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
-          stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+          if ~isempty(options.artifactCutoff)
+            stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
+            stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+          end
           for iShift = 1:options.artifactExpandSamples
             if iShift > options.artifactForwardExpandSamples
               stimMask = logical(stimMask + [false(1,iShift) stimMask(1:end-iShift)]);
@@ -311,8 +315,10 @@ for iGroup = 1:nGroups
           absTimeseriesSmooth = smooth(abs(timeseriesData(iChan,:)), round(samplingRate/1));
           baselineSmooth = prctile(absTimeseriesSmooth, options.baselinePrctile);
           stimMask(absTimeseriesSmooth >= baselineSmooth*options.absAmpSmoothCutoffFactor) = true;
-          stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
-          stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+          if ~isempty(options.artifactCutoff)
+            stimMask(timeseriesData(iChan,:) >= options.artifactCutoff(1)) = true;
+            stimMask(timeseriesData(iChan,:) <= options.artifactCutoff(2)) = true;
+          end
           chanGroupMask = ismember(options.channelGroups(:,end), iChan);
           if any(chanGroupMask)
             for iShift = 1:options.artifactExpandSamples
