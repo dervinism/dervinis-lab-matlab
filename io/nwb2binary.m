@@ -119,7 +119,7 @@ end
 
 % Parameters
 options.segmentSize = 1e8; % samples. 1875 seconds for 32kHz sampling frequency
-options.absAmpSmoothCutoffFactor = 1.15; % baseline factor
+options.absAmpSmoothCutoffFactor = 1.25; % baseline factor
 options.artifactExpandSamples = 20; % samples
 options.artifactForwardExpandSamples = 20; % samples
 options.largeArtifactExpandTime = 0.05; % seconds
@@ -315,6 +315,14 @@ for iGroup = 1:nGroups
             diffStimMask = [0 diff(stimMask)];
             onsets = find(diffStimMask > 0);
             offsets = find(diffStimMask < 0);
+            if isempty(onsets) && ~isempty(offsets)
+              onsets = 1;
+            elseif isempty(onsets) && isempty(offsets) && diffStimMask(1)
+              onsets = 1;
+              offsets = numel(diffStimMask);
+            elseif isempty(onsets) && isempty(offsets)
+              continue
+            end
             if onsets(1) > offsets(1)
               onsets = [1 onsets]; %#ok<*AGROW>
             end
