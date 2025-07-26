@@ -81,6 +81,9 @@ function nwb2binary(inputFile, outputFile, options)
 %     array of channel groups. Rows correspond tetrodes and columns
 %     correspond to individual channels. By default assumes consequtive
 %     tetrode channel pairings.
+%   zeroPeriods (numeric, optional, keyword): a shape-(1, 2) numeric array
+%     defining segment range for saving inclusively. If left empty, all
+%     segments are saved within a single file (default).
 %
 % Returns:
 %   None
@@ -110,6 +113,7 @@ arguments
   options.dataConversionFactor (1,1) {mustBePositive} = 1
   options.car (1,1) {islogical} = false
   options.channelGroups (:,:) {mustBePositive} = [1:4; 5:8; 9:12; 13:16; 17:20; 21:24; 25:28; 29:32];
+  options.segmentRange (:,:) {mustBeNumeric} = []
 end
 
 % Parse input
@@ -140,7 +144,12 @@ for iGroup = 1:nGroups
   dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
   % Convert each segment of a timeseries group
   nSegments = ceil(size(dataContainer.data,2)/options.segmentSize);
-  for iSegment = 1:nSegments
+  if isempty(options.segmentRange)
+    segmentRange = 1:nSegments;
+  else
+    segmentRange = options.segmentRange(1):min([options.segmentRange(2) nSegments]);
+  end
+  for iSegment = segmentRange
     disp(['Segment ' num2str(iSegment) '/' num2str(nSegments)]);
     segmentInds = (1:options.segmentSize) + (iSegment-1)*options.segmentSize;
     segmentInds(segmentInds > size(dataContainer.data,2)) = [];
@@ -428,7 +437,12 @@ for iGroup = 1:nGroups
 
     % Save the binary file
     [~,~,ext] = fileparts(outputFile);
-    outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} ext];
+    if isempty(options.segmentRange)
+      suffix = '';
+    else
+      suffix = ['_segments_' num2str(segmentRange(1)) '_' num2str(segmentRange(end))];
+    end
+    outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} suffix ext];
     if strcmpi(dataType, options.precision) || ~isempty(options.precision)
       timeseriesData = cast(timeseriesData, options.precision);
     else
