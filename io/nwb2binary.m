@@ -81,7 +81,7 @@ function nwb2binary(inputFile, outputFile, options)
 %     array of channel groups. Rows correspond tetrodes and columns
 %     correspond to individual channels. By default assumes consequtive
 %     tetrode channel pairings.
-%   zeroPeriods (numeric, optional, keyword): a shape-(1, 2) numeric array
+%   segmentRange (numeric, optional, keyword): a shape-(1, 2) numeric array
 %     defining segment range for saving inclusively. If left empty, all
 %     segments are saved within a single file (default).
 %
