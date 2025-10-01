@@ -68,12 +68,23 @@ save(fullfile(session.general.basepath, ...
   [session.general.name, '.session.mat']), 'session');
 
 % Run the Phy to CellExplorer pipeline
-unitSpikes = loadSpikes('basepath',basepath, 'basename',basename, ...
-  'labelsToRead',{'good'}, 'forceReload',true, 'showWaveforms',false, ...
-  'session',session);
-spikes = loadSpikes('basepath',basepath, 'basename',basename, ...
-  'labelsToRead',{'good','mua'}, 'forceReload',true, 'showWaveforms',false, ...
-  'session',session);
+try
+  unitSpikes = loadSpikes('basepath',basepath, 'basename',basename, ...
+    'labelsToRead',{'good'}, 'forceReload',true, 'showWaveforms',false, ...
+    'session',session);
+catch
+  unitSpikes.cluID = [];
+  unitSpikes.numcells = 0;
+end
+try
+  spikes = loadSpikes('basepath',basepath, 'basename',basename, ...
+    'labelsToRead',{'good','mua'}, 'forceReload',true, 'showWaveforms',false, ...
+    'session',session);
+catch
+  spikes.cluID = [];
+  spikes.numcells = 0;
+  spikes.basename = fullfile(basepath, basename);
+end
 unitMask = ismember(spikes.cluID, unitSpikes.cluID);
 spikes.labels = cell(1, spikes.numcells);
 for iUnit = 1:spikes.numcells

@@ -76,7 +76,7 @@ yAdjusted = yAdjusted(~points2exclude);
 if strcmpi(options.type, 'linear-linear')
   coefficients = polyfit(xAdjusted, yAdjusted, 1);
 elseif strcmpi(options.type, 'linear-circular-fma')
-  coefficients = CircularRegression(xAdjusted, yAdjusted, options.corrCoef);
+  coefficients = CircularRegression(xAdjusted, yAdjusted, 'slope', options.corrCoef);
 elseif strcmpi(options.type, 'linear-circular-pp')
   [coefficients(1), coefficients(2)] = CircularLinearRegression(yAdjusted, xAdjusted, options.corrCoef);
 end

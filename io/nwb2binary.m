@@ -122,7 +122,7 @@ if ~isempty(options.timeseriesGroup) && ischar(options.timeseriesGroup)
 end
 
 % Parameters
-options.segmentSize = 1e8; % samples. 1875 seconds for 32kHz sampling frequency
+options.segmentSize = 1e8; % samples. 3125 seconds for 32kHz sampling frequency
 options.absAmpSmoothCutoffFactor = 1.25; % baseline factor
 options.artifactExpandSamples = 20; % samples
 options.artifactForwardExpandSamples = 20; % samples
@@ -154,6 +154,7 @@ for iGroup = 1:nGroups
     segmentInds = (1:options.segmentSize) + (iSegment-1)*options.segmentSize;
     segmentInds(segmentInds > size(dataContainer.data,2)) = [];
     timeseriesData = dataContainer.data(:,segmentInds);
+    %timeseriesData = dataContainer.data(10:25,segmentInds);
     samplingRate = dataContainer.starting_time_rate;
     if isempty(samplingRate)
       timestamps = dataContainer.timestamps(segmentInds)';
@@ -346,6 +347,8 @@ for iGroup = 1:nGroups
             elseif isempty(onsets) && isempty(offsets) && diffStimMask(1)
               onsets = 1;
               offsets = numel(diffStimMask);
+            elseif ~isempty(onsets) && isempty(offsets)
+              offsets = numel(diffStimMask);
             elseif isempty(onsets) && isempty(offsets)
               continue
             end
@@ -463,4 +466,4 @@ end
 % Save binary generation parameters (for replication)
 procTime = datetime;
 matFile = [outputFile_group(1:end-4) '.mat'];
-save(matFile, 'inputFile', 'outputFile', 'options','procTime', '-v7.3');
+save(matFile, 'inputFile', 'outputFile', 'options', 'nChans', 'procTime', '-v7.3');
