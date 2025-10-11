@@ -72,7 +72,7 @@ function nwb2binary(inputFile, outputFile, options)
 %     (default=false).
 %   dataConversionFactor (numeric, optional, keyword): a shape-(1, 1)
 %     numeric scalar used to multiple data to convert it into appropriate
-%     precision format (default=32000).
+%     precision format (default=1).
 %   car (logical, optional, keyword): a shape-(1, 1) logical scalar
 %     controlling the application of the common average reference (CAR).
 %     Referencing is applied on a per lead basis described in
@@ -190,7 +190,8 @@ for iGroup = 1:nGroups
         frequencyCutoff=options.highCutoffFreq);
     end
     SD_post = mean(std(timeseriesData,[],2));
-    timeseriesData = timeseriesData.*(SD_prior/SD_post);
+    scaleFactor = SD_prior/SD_post;
+    %timeseriesData = timeseriesData.*(scaleFactor);
 
     % Subtract CAR
     nChans = size(timeseriesData,1);
@@ -203,6 +204,11 @@ for iGroup = 1:nGroups
       elseif size(options.channelGroups,1) == 4
         leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
                       options.channelGroups(3,:) options.channelGroups(4,:)];
+      elseif size(options.channelGroups,1) == 5
+        % leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:) options.channelGroups(3,:); ...
+        %               options.channelGroups(4,:) options.channelGroups(5,:) options.channelGroups(5,:)];
+        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:) options.channelGroups(2,:); ...
+                      options.channelGroups(3,:) options.channelGroups(4,:) options.channelGroups(5,:)];
       elseif size(options.channelGroups,1) == 6
         leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
                       options.channelGroups(3,:) options.channelGroups(4,:); ...
@@ -219,13 +225,14 @@ for iGroup = 1:nGroups
                       options.channelGroups(7,:) options.channelGroups(8,:); ...
                       options.channelGroups(9,:) options.channelGroups(10,:)];
       end
-      for iTetrode = 1:size(leadGroups,1)
-        medianChannel = median(timeseriesData(leadGroups(iTetrode,:),:), 2);
-        timeseriesData(leadGroups(iTetrode,:),:) = bsxfun( ...
-          @minus, timeseriesData(leadGroups(iTetrode,:),:), medianChannel);
-        medianTrace = median(timeseriesData(leadGroups(iTetrode,:),:), 1);
-        timeseriesData(leadGroups(iTetrode,:),:) = bsxfun( ...
-          @minus, timeseriesData(leadGroups(iTetrode,:),:), medianTrace);
+      for iLead = 1:size(leadGroups,1)
+        [~, chanInds] = unique(leadGroups(iLead,:));
+        medianChannel = median(timeseriesData(leadGroups(iLead,chanInds),:), 2, 'omitnan');
+        timeseriesData(leadGroups(iLead,chanInds),:) = bsxfun( ...
+          @minus, timeseriesData(leadGroups(iLead,chanInds),:), medianChannel);
+        medianTrace = median(timeseriesData(leadGroups(iLead,chanInds),:), 1, 'omitnan');
+        timeseriesData(leadGroups(iLead,chanInds),:) = bsxfun( ...
+          @minus, timeseriesData(leadGroups(iLead,chanInds),:), medianTrace);
       end
     end
 
@@ -412,7 +419,7 @@ for iGroup = 1:nGroups
     end
 
     % Filter data
-    SD_prior = mean(std(timeseriesData,[],2));
+    %SD_prior = mean(std(timeseriesData,[],2));
     if strcmpi(options.filter, 'bandpass_post')
       timeseriesData = bandpassFilterTimeSeries(timeseriesData, ...
         sampleRate=samplingRate, ...
@@ -426,8 +433,8 @@ for iGroup = 1:nGroups
         sampleRate=samplingRate, ...
         frequencyCutoff=options.highCutoffFreq);
     end
-    SD_post = mean(std(timeseriesData,[],2));
-    timeseriesData = timeseriesData.*(SD_prior/SD_post);
+    %SD_post = mean(std(timeseriesData,[],2));
+    %timeseriesData = timeseriesData.*(SD_prior/SD_post);
 
     % Visualise data
     if options.visualiseData
