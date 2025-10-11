@@ -53,7 +53,6 @@ function [timeseriesData, timestamps] = nwb2mat(inputFile, options)
 %   matnwb (https://neurodatawithoutborders.github.io/matnwb/)
 %   dervinism/dervinis-lab-matlab
 %     (https://github.com/dervinism/dervinis-lab-matlab).
-%   buzsakilab/buzcode (https://github.com/buzsakilab/buzcode).
 %
 % Authors:
 %   Martynas Dervinis (martynas.dervinis@gmail.com)
