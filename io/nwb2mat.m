@@ -11,8 +11,7 @@ function [timeseriesData, timestamps] = nwb2mat(inputFile, options)
 %   timeseriesGroup (char | cell, optional, keyword): a shape-(1, m)
 %     character or cell array containing the NWB timeseries group or
 %     multiple groups to be converted into the binary format. If not
-%     specified, all timeseries groups will be saved in separate binary
-%     files.
+%     specified, loads microelectrode data.
 %   filter (logical, optional, keyword): a shape-(1, 1) logical scalar
 %     indicating whether to bandpass filter the data (default=false).
 %   freqRange (numeric, optional, keyword): a shape-(1, 2) numeric array
@@ -32,7 +31,7 @@ function [timeseriesData, timestamps] = nwb2mat(inputFile, options)
 %     Referencing is applied on a per lead basis described in
 %     channelGroups (default=false).
 %   channelGroups (numeric, optional, keyword): a shape-(k, l) numeric
-%     array of channel groups. Rows correspond tetrodes and columns
+%     array of channel groups. Rows correspond to tetrodes and columns
 %     correspond to individual channels. By default assumes consequtive
 %     tetrode channel pairings.
 %   segmentSize (numeric, optional, keyword): a shape-(1, 1) numeric scalar
