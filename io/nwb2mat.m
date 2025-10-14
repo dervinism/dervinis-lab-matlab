@@ -8,9 +8,8 @@ function [timeseriesData, timestamps] = nwb2mat(inputFile, options)
 %   inputFile (char, required, positional): a shape-(1, n) character
 %     array containing the input NWB file name with a full path. It must
 %     end with '.nwb'.
-%   timeseriesGroup (char | cell, optional, keyword): a shape-(1, m)
-%     character or cell array containing the NWB timeseries group or
-%     multiple groups to be converted into the binary format. If not
+%   timeseriesGroup (char, optional, keyword): a shape-(1, m) character
+%     array containing the NWB timeseries group name to be loaded. If not
 %     specified, loads microelectrode data.
 %   filter (logical, optional, keyword): a shape-(1, 1) logical scalar
 %     indicating whether to bandpass filter the data (default=false).
