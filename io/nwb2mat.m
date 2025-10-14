@@ -23,8 +23,8 @@ function [timeseriesData, timestamps] = nwb2mat(inputFile, options)
 %     array of upper and lower voltage cutoff values in microvolts used
 %     when removeArtifacts is set to true (default=[1500 -1500]).
 %   gain (numeric, optional, keyword): a shape-(1, 1) numeric scalar used
-%     to multiple data to convert it into appropriate
-%     precision format (default=1).
+%     to multiply data to convert it into appropriate precision format
+%     (default=1).
 %   car (logical, optional, keyword): a shape-(1, 1) logical scalar
 %     controlling the application of the common average reference (CAR).
 %     Referencing is applied on a per lead basis described in
@@ -53,7 +53,7 @@ function [timeseriesData, timestamps] = nwb2mat(inputFile, options)
 %     (https://github.com/dervinism/dervinis-lab-matlab).
 %
 % Authors:
-%   Martynas Dervinis (martynas.dervinis@gmail.com)
+%   Martynas Dervinis (martynas.dervinis@gmail.com).
 
 arguments
   inputFile (1,:) {mustBeA(inputFile,'char'),mustBeVector,endsWith(inputFile,'.nwb')}
