@@ -4,7 +4,7 @@ spikeData.files = {'W:\Personal\Martynas\Spikesorting\kilosort4\MSEL_02717\msel_
                    'W:\Personal\Martynas\Spikesorting\kilosort4\MSEL_02717\msel_02717_ICU02a_TimeSeries_32000_Hz_segments_13_24\temp_wh.spikes.cellinfo.mat'; ...
                    'W:\Personal\Martynas\Spikesorting\kilosort4\MSEL_02717\msel_02717_ICU02a_TimeSeries_32000_Hz_segments_13_24\temp_wh.spikes.cellinfo.mat'};
 
-spikeData.startTimes = [0 0 3125 3125];
+spikeData.startTimes = [0 0 12*3125 12*3125];
 
 spikeData.existingUnitIDs = [49 59 59 63];
 
