@@ -123,7 +123,7 @@ end
 
 % Parameters
 options.segmentSize = 1e8; % samples. 3125 seconds for 32kHz sampling frequency
-options.absAmpSmoothCutoffFactor = 1.25; % baseline factor
+options.absAmpSmoothCutoffFactor = 1.05; % baseline factor
 options.artifactExpandSamples = 20; % samples
 options.artifactForwardExpandSamples = 20; % samples
 options.largeArtifactExpandTime = 0.05; % seconds
@@ -162,6 +162,12 @@ for iGroup = 1:nGroups
       samplingRate = 1/median(diff(timestamps));
     else
       timestamps = segmentInds./samplingRate;
+    end
+    if iSegment == segmentRange(1)
+      startTime = timestamps(1);
+      if ~isempty(options.zeroPeriods)
+        options.zeroPeriods(:,2:3) = options.zeroPeriods(:,2:3) + startTime;
+      end
     end
 
     % Convert to double
@@ -388,30 +394,33 @@ for iGroup = 1:nGroups
     if ~isempty(options.zeroPeriods)
       nPeriods = size(options.zeroPeriods,1);
       for iPeriod = 1:nPeriods
-        if ~options.zeroPeriods(iPeriod,2)
-          inds(1) = 1;
-        else
-          inds(1) = find(timestamps - options.zeroPeriods(iPeriod,2) > 0, 1);
-        end
-        if isinf(options.zeroPeriods(iPeriod,3))
-          inds(2) = inf;
-        else
-          inds(2) = find(timestamps - options.zeroPeriods(iPeriod,3) > 0, 1);
-        end
-        if options.zeroPeriods(iPeriod,1)
-          if isinf(inds(2))
-            timeseriesData(options.zeroPeriods(iPeriod,1),inds(1):end) = ...
-              median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
+        if ~(options.zeroPeriods(iPeriod,2) < timestamps(1) && options.zeroPeriods(iPeriod,3) < timestamps(1)) && ...
+            ~(options.zeroPeriods(iPeriod,2) > timestamps(end) && options.zeroPeriods(iPeriod,3) > timestamps(end))
+          if options.zeroPeriods(iPeriod,2) <= timestamps(1)
+            inds(1) = 1;
           else
-            timeseriesData(options.zeroPeriods(iPeriod,1),inds(1):inds(2)) = ...
-              median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
+            inds(1) = find(timestamps - options.zeroPeriods(iPeriod,2) > 0, 1);
           end
-        else
-          for iChan = 1:nChans
+          if options.zeroPeriods(iPeriod,3) >= timestamps(end)
+            inds(2) = inf;
+          else
+            inds(2) = find(timestamps - options.zeroPeriods(iPeriod,3) > 0, 1);
+          end
+          if options.zeroPeriods(iPeriod,1)
             if isinf(inds(2))
-              timeseriesData(iChan,inds(1):end) = median(timeseriesData(iChan,:));
+              timeseriesData(options.zeroPeriods(iPeriod,1),inds(1):end) = ...
+                median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
             else
-              timeseriesData(iChan,inds(1):inds(2)) = median(timeseriesData(iChan,:));
+              timeseriesData(options.zeroPeriods(iPeriod,1),inds(1):inds(2)) = ...
+                median(timeseriesData(options.zeroPeriods(iPeriod,1),:));
+            end
+          else
+            for iChan = 1:nChans
+              if isinf(inds(2))
+                timeseriesData(iChan,inds(1):end) = median(timeseriesData(iChan,:));
+              else
+                timeseriesData(iChan,inds(1):inds(2)) = median(timeseriesData(iChan,:));
+              end
             end
           end
         end
