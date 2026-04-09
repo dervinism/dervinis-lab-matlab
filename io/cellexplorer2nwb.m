@@ -54,9 +54,23 @@ spikesConv = struct();
 for iUnit = 1:nUnits
   fileToLoad = spikeData.files{iUnit};
   if ~strcmpi(loadedFile,fileToLoad)
+    if exist('trackCheckedUnits','var')
+      if numel(trackCheckedUnits) ~= ...
+          numel(spikes.cluID(cellfun(@(x) strcmpi(x, 'unit'), spikes.labels)))
+        error(['Not all units from the previous CellExplorer file were checked: ' ...
+          loadedFile]);
+      end
+    end
     load(fileToLoad); %#ok<*LOAD>
+    loadedFile = fileToLoad;
+    trackCheckedUnits = [];
   end
   unitIndExisting = find(spikeData.existingUnitIDs(iUnit) == spikes.cluID);
+  trackCheckedUnits = [trackCheckedUnits spikes.cluID(unitIndExisting)]; %#ok<AGROW>
+  if isempty(unitIndExisting)
+    error(['Unit ' num2str(spikeData.existingUnitIDs(iUnit)) ...
+      ' does not exist in the file ' fileToLoad]);
+  end
   unitIndNew = spikeData.newGlobalUnitIDs(iUnit);
   if iUnit == 1 || unitIndNew > numel(spikesConv.cluID)
     spikesConv.times{unitIndNew} = spikes.times{unitIndExisting} + spikeData.startTimes(unitIndExisting);
@@ -68,7 +82,7 @@ for iUnit = 1:nUnits
     spikesConv.labels{unitIndNew} = spikes.labels{unitIndExisting};
     spikesConv.chLabels{unitIndNew} = spikeData.chLabels{iUnit};
     spikesConv.areaLabels{unitIndNew} = spikeData.areaLabels{iUnit};
-  elseif unitIndNew == numel(spikesConv.cluID)
+  elseif unitIndNew <= numel(spikesConv.cluID)
     spikesConv.times{unitIndNew} = [spikesConv.times{unitIndNew}; ...
       spikes.times{unitIndExisting} + spikeData.startTimes(unitIndExisting)];
     spikesConv.cluID{unitIndNew} = unitIndNew;
