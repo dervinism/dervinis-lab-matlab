@@ -25,6 +25,7 @@ function spikeData = extractUnitTableInfo(binaryFileBasename, unitTableFile, opt
 %       areaLabels - area where units were recorded;
 %       files - names of binary files with recorded units;
 %       startTimes - start times of those binary files in seconds.
+%       x, y, z - 3D atlas coordinates
 %
 % Authors:
 %   Martynas Dervinis (martynas.dervinis@gmail.com)
@@ -47,6 +48,9 @@ spikeData.leadLabels = {};
 spikeData.areaLabels = {};
 spikeData.files = {};
 spikeData.startTimes = [];
+spikeData.x = [];
+spikeData.y = [];
+spikeData.z = [];
 
 % Extract data
 nBinFiles = 0;
@@ -77,5 +81,8 @@ for iColumn = 1:nColumns
       spikeData.files = [spikeData.files binaryFilename];
       spikeData.startTimes = [spikeData.startTimes (nBinFiles-1)*options.chunkDuration];
     end
+    spikeData.x = [spikeData.x unitTable.x(valueMask)'];
+    spikeData.y = [spikeData.y unitTable.y(valueMask)'];
+    spikeData.z = [spikeData.z unitTable.z(valueMask)'];
   end
 end

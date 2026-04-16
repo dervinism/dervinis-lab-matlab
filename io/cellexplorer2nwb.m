@@ -1,5 +1,5 @@
 function cellexplorer2nwb(spikeData, nwbFile, options)
-% cellexplorer2nwb(spikeData, nwbFile, <outputFile>)
+% cellexplorer2nwb(spikeData, nwbFile, <options>)
 %
 % Function converts spike sorting output saved in the CellExplorer
 % (https://cellexplorer.org/) format (spikes.cellinfo.mat) to NWB format by
@@ -23,9 +23,12 @@ function cellexplorer2nwb(spikeData, nwbFile, options)
 %   nwbFile (char, required, positional): a shape-(1, n) character array
 %     containing the input NWB file name with a full path that needs
 %     updating. It must end with '.nwb'.
-%   outputFile (char, required, positional): a shape-(1, m) character array
+%   outputFile (char, optional, keyword): a shape-(1, m) character array
 %     containing the name of the updated NWB file in case it is different
 %     to the original input file. It must end with '.nwb'.
+%   loadCoordsFromUnitTable (logical, optional, keyword): a shape-(1, 1)
+%     logical scalar indicating whether to load channel coordinates from a
+%     unit table file instead of the NWB raw data file (default is false).
 %
 % Returns:
 %   None.
@@ -40,6 +43,7 @@ arguments
   spikeData (1,1) {mustBeA(spikeData,'struct')}
   nwbFile (1,:) {mustBeA(nwbFile,'char'),mustBeVector,endsWith(nwbFile,'.nwb')}
   options.outputFile (1,:) {mustBeA(options.outputFile,'char'),mustBeVector,endsWith(options.outputFile,'.nwb')} = '';
+  options.loadCoordsFromUnitTable (1,1) {islogical} = false
 end
 
 % Parse input
@@ -81,7 +85,13 @@ for iUnit = 1:nUnits
     spikesConv.filtWaveformSD{unitIndNew} = spikes.rawWaveform_std{unitIndExisting};
     spikesConv.labels{unitIndNew} = spikes.labels{unitIndExisting};
     spikesConv.chLabels{unitIndNew} = spikeData.chLabels{iUnit};
+    spikesConv.leadLabels{unitIndNew} = spikeData.leadLabels{iUnit};
     spikesConv.areaLabels{unitIndNew} = spikeData.areaLabels{iUnit};
+    if options.loadCoordsFromUnitTable
+      spikesConv.x{unitIndNew} = spikeData.x(iUnit);
+      spikesConv.y{unitIndNew} = spikeData.y(iUnit);
+      spikesConv.z{unitIndNew} = spikeData.z(iUnit);
+    end
   elseif unitIndNew <= numel(spikesConv.cluID)
     spikesConv.times{unitIndNew} = [spikesConv.times{unitIndNew}; ...
       spikes.times{unitIndExisting} + spikeData.startTimes(unitIndExisting)];
@@ -94,6 +104,11 @@ for iUnit = 1:nUnits
     spikesConv.chLabels{unitIndNew} = spikeData.chLabels{iUnit};
     spikesConv.leadLabels{unitIndNew} = spikeData.leadLabels{iUnit};
     spikesConv.areaLabels{unitIndNew} = spikeData.areaLabels{iUnit};
+    if options.loadCoordsFromUnitTable
+      spikesConv.x{unitIndNew} = spikeData.x(iUnit);
+      spikesConv.y{unitIndNew} = spikeData.y(iUnit);
+      spikesConv.z{unitIndNew} = spikeData.z(iUnit);
+    end
   else
     error('Unit IDs are not expected to decrease.');
   end
@@ -106,17 +121,27 @@ electrodesTable = nwb.general_extracellular_ephys_electrodes.toTable();
 % Obtain additional channel info
 nUnits = numel(spikesConv.cluID);
 for iUnit = 1:nUnits
-  spikesConv.channelInds{iUnit} = find(ismember(electrodesTable.ChName, spikesConv.chLabels{iUnit}));
-  spikesConv.x{iUnit} = electrodesTable.x(spikesConv.channelInds{iUnit});
-  spikesConv.y{iUnit} = electrodesTable.y(spikesConv.channelInds{iUnit});
-  spikesConv.z{iUnit} = electrodesTable.z(spikesConv.channelInds{iUnit});
+  channelInd = find(ismember(electrodesTable.ChName, spikesConv.chLabels{iUnit}));
+  if isempty(channelInd)
+    electrodesTable.ChName = cellfun(@(x) strrep(x, '_000', ''), electrodesTable.ChName, 'UniformOutput', false);
+    electrodesTable.ChName = cellfun(@(x) strrep(x, '_00', ''), electrodesTable.ChName, 'UniformOutput', false);
+    electrodesTable.ChName = cellfun(@(x) strrep(x, '_0', ''), electrodesTable.ChName, 'UniformOutput', false);
+    channelInd = find(ismember(electrodesTable.ChName, spikesConv.chLabels{iUnit}));
+    assert(~isempty(channelInd));
+  end
+  spikesConv.channelInds{iUnit} = channelInd;
+  if ~options.loadCoordsFromUnitTable
+    spikesConv.x{iUnit} = electrodesTable.x(spikesConv.channelInds{iUnit});
+    spikesConv.y{iUnit} = electrodesTable.y(spikesConv.channelInds{iUnit});
+    spikesConv.z{iUnit} = electrodesTable.z(spikesConv.channelInds{iUnit});
+  end
   spikesConv.group{iUnit} = electrodesTable.group_name{spikesConv.channelInds{iUnit}};
 end
 
 % Create units table
 dataDescription = 'Single unit activity';
 [spike_times_vector, spike_times_index] = util.create_indexed_column( ...
-  spikesConv.times, dataDescription);
+  spikesConv.times', dataDescription);
 
 nwb.units = types.core.Units( ...
   'colnames', { ... % Provide the column order. All column names have to be defined below
