@@ -37,7 +37,11 @@ arguments
 end
 
 % Load the unit table
-unitTable = readtable(unitTableFile);
+if isempty(unitTableFile)
+  unitTable = [];
+else
+  unitTable = readtable(unitTableFile);
+end
 
 % Initialise storage variables
 spikeData.existingUnitIDs = [];
@@ -51,38 +55,72 @@ spikeData.startTimes = [];
 spikeData.x = [];
 spikeData.y = [];
 spikeData.z = [];
+spikeData.types = {};
 
 % Extract data
-nBinFiles = 0;
-nColumns = size(unitTable,2);
-labels = unitTable.Properties.VariableNames;
-for iColumn = 1:nColumns
-  label = labels{iColumn};
-  columnData = unitTable.(label)';
-  columnData = columnData(1:end-1);
-  if isnumeric(columnData)
-    valueMask = ~isnan(columnData);
-  else
-    valueMask = true(1,numel(columnData));
+if isempty(unitTable)
+  matFilename = [binaryFileBasename filesep 'temp_wh.spikes.cellinfo.mat'];
+  load(matFilename) %#ok<*LOAD>
+  spikeData.existingUnitIDs = spikes.cluID;
+  spikeData.newGlobalUnitCh = spikes.maxWaveformCh;
+  for iUnit = 1:spikes.numcells
+    spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs iUnit];
+    spikeData.files = [spikeData.files matFilename];
+    spikeData.startTimes = [spikeData.startTimes 0];
   end
-  nUnits = sum(valueMask);
-  columnData = columnData(valueMask);
-  valueMask = [valueMask false]; %#ok<AGROW>
-  if startsWith(label, 'x') && endsWith(label, 'Id')
-    nBinFiles = nBinFiles + 1;
-    spikeData.existingUnitIDs = [spikeData.existingUnitIDs columnData];
-    spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs unitTable.id(valueMask)'];
-    spikeData.newGlobalUnitCh = [spikeData.newGlobalUnitCh unitTable.ch(valueMask)'];
-    spikeData.chLabels = [spikeData.chLabels unitTable.channelLabel(valueMask)'];
-    spikeData.leadLabels = [spikeData.leadLabels unitTable.leadLabel(valueMask)'];
-    spikeData.areaLabels = [spikeData.areaLabels unitTable.areaLabel(valueMask)'];
-    binaryFilename = [binaryFileBasename label(2:8) filesep 'temp_wh.spikes.cellinfo.mat'];
-    for iUnit = 1:nUnits
-      spikeData.files = [spikeData.files binaryFilename];
-      spikeData.startTimes = [spikeData.startTimes (nBinFiles-1)*options.chunkDuration];
+  spikeData.types = spikes.labels;
+else
+  nBinFiles = 0;
+  nColumns = size(unitTable,2);
+  labels = unitTable.Properties.VariableNames;
+  for iColumn = 1:nColumns
+    label = labels{iColumn};
+    columnData = unitTable.(label)';
+    columnData = columnData(1:end-1);
+    if isnumeric(columnData)
+      valueMask = ~isnan(columnData);
+    else
+      valueMask = true(1,numel(columnData));
     end
-    spikeData.x = [spikeData.x unitTable.x(valueMask)'];
-    spikeData.y = [spikeData.y unitTable.y(valueMask)'];
-    spikeData.z = [spikeData.z unitTable.z(valueMask)'];
+    nUnits = sum(valueMask);
+    columnData = columnData(valueMask);
+    valueMask = [valueMask false]; %#ok<AGROW>
+    if (startsWith(label, 'x') || startsWith(label, '_')) && (endsWith(label, 'Id') || endsWith(label, 'id'))
+      nBinFiles = nBinFiles + 1;
+      spikeData.existingUnitIDs = [spikeData.existingUnitIDs columnData];
+      spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs unitTable.id(valueMask)'];
+      spikeData.newGlobalUnitCh = [spikeData.newGlobalUnitCh unitTable.ch(valueMask)'];
+      spikeData.chLabels = [spikeData.chLabels unitTable.channelLabel(valueMask)'];
+      spikeData.leadLabels = [spikeData.leadLabels unitTable.leadLabel(valueMask)'];
+      spikeData.areaLabels = [spikeData.areaLabels unitTable.areaLabel(valueMask)'];
+      try
+        matFilename = [binaryFileBasename label(2:8) filesep 'temp_wh.spikes.cellinfo.mat'];
+      catch
+        matFilename = [binaryFileBasename filesep 'temp_wh.spikes.cellinfo.mat'];
+      end
+      for iUnit = 1:nUnits
+        spikeData.files = [spikeData.files matFilename];
+        spikeData.startTimes = [spikeData.startTimes (nBinFiles-1)*options.chunkDuration];
+        spikeData.types = [spikeData.types 'unit'];
+      end
+      try
+        spikeData.x = [spikeData.x unitTable.x(valueMask)'];
+        spikeData.y = [spikeData.y unitTable.y(valueMask)'];
+        spikeData.z = [spikeData.z unitTable.z(valueMask)'];
+      catch
+        % do nothing
+      end
+      load(matFilename) %#ok<*LOAD>
+      spikeData.existingUnitIDs = spikes.cluID;
+      for iUnit = 1:spikes.numcells
+        if strcmpi(spikes.labels{iUnit}, 'mua')
+          spikeData.existingUnitIDs = [spikeData.existingUnitIDs spikeData.cluID(iUnit)];
+          spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs numel(spikeData.newGlobalUnitIDs)+1];
+        end
+        spikeData.files = [spikeData.files matFilename];
+        spikeData.startTimes = [spikeData.startTimes spikeData.startTimes(end)];
+        spikeData.types = [spikeData.types 'mua'];
+      end
+    end
   end
 end

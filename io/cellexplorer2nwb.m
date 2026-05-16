@@ -53,6 +53,10 @@ end
 
 % Load spiking data and convert it
 nUnits = numel(spikeData.existingUnitIDs);
+if ~nUnits
+  warning('Empty spikeData supplied. Exiting cellexplorer2nwb function.');
+  return
+end
 loadedFile = '';
 spikesConv = struct();
 for iUnit = 1:nUnits
@@ -77,7 +81,7 @@ for iUnit = 1:nUnits
   end
   unitIndNew = spikeData.newGlobalUnitIDs(iUnit);
   if iUnit == 1 || unitIndNew > numel(spikesConv.cluID)
-    spikesConv.times{unitIndNew} = spikes.times{unitIndExisting} + spikeData.startTimes(unitIndExisting);
+    spikesConv.times{unitIndNew} = spikes.times{unitIndExisting} + spikeData.startTimes(iUnit);
     spikesConv.cluID{unitIndNew} = unitIndNew;
     spikesConv.maxWaveformCh1{unitIndNew} = spikeData.newGlobalUnitCh(iUnit)+1;
     spikesConv.filtWaveform{unitIndNew} = ...
@@ -94,7 +98,7 @@ for iUnit = 1:nUnits
     end
   elseif unitIndNew <= numel(spikesConv.cluID)
     spikesConv.times{unitIndNew} = [spikesConv.times{unitIndNew}; ...
-      spikes.times{unitIndExisting} + spikeData.startTimes(unitIndExisting)];
+      spikes.times{unitIndExisting} + spikeData.startTimes(iUnit)];
     spikesConv.cluID{unitIndNew} = unitIndNew;
     spikesConv.maxWaveformCh1{unitIndNew} = spikeData.newGlobalUnitCh(iUnit)+1;
     spikesConv.filtWaveform{unitIndNew} = ...
@@ -126,6 +130,8 @@ for iUnit = 1:nUnits
     electrodesTable.ChName = cellfun(@(x) strrep(x, '_000', ''), electrodesTable.ChName, 'UniformOutput', false);
     electrodesTable.ChName = cellfun(@(x) strrep(x, '_00', ''), electrodesTable.ChName, 'UniformOutput', false);
     electrodesTable.ChName = cellfun(@(x) strrep(x, '_0', ''), electrodesTable.ChName, 'UniformOutput', false);
+    electrodesTable.ChName = cellfun(@(x) strrep(x, '_', ''), electrodesTable.ChName, 'UniformOutput', false);
+    electrodesTable.ChName = cellfun(@(x) strrep(x, 'Ch', ''), electrodesTable.ChName, 'UniformOutput', false);
     channelInd = find(ismember(electrodesTable.ChName, spikesConv.chLabels{iUnit}));
     assert(~isempty(channelInd));
   end
@@ -135,7 +141,7 @@ for iUnit = 1:nUnits
     spikesConv.y{iUnit} = electrodesTable.y(spikesConv.channelInds{iUnit});
     spikesConv.z{iUnit} = electrodesTable.z(spikesConv.channelInds{iUnit});
   end
-  spikesConv.group{iUnit} = electrodesTable.group_name{spikesConv.channelInds{iUnit}};
+  spikesConv.group(iUnit) = electrodesTable.group(spikesConv.channelInds{iUnit});
 end
 
 % Create units table
