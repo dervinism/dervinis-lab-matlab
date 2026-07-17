@@ -57,6 +57,13 @@ spikeData.y = [];
 spikeData.z = [];
 spikeData.types = {};
 
+spikeData_muas.existingUnitIDs = [];
+spikeData_muas.newGlobalUnitCh = [];
+spikeData_muas.newGlobalUnitIDs = [];
+spikeData_muas.files = {};
+spikeData_muas.startTimes = [];
+spikeData_muas.types = {};
+
 % Extract data
 if isempty(unitTable)
   matFilename = [binaryFileBasename filesep 'temp_wh.spikes.cellinfo.mat'];
@@ -110,16 +117,51 @@ else
       catch
         % do nothing
       end
+
       load(matFilename) %#ok<*LOAD>
-      spikeData.existingUnitIDs = spikes.cluID;
       for iUnit = 1:spikes.numcells
         if strcmpi(spikes.labels{iUnit}, 'mua')
-          spikeData.existingUnitIDs = [spikeData.existingUnitIDs spikeData.cluID(iUnit)];
-          spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs numel(spikeData.newGlobalUnitIDs)+1];
+          spikeData_muas.existingUnitIDs = [spikeData_muas.existingUnitIDs spikes.cluID(iUnit)];
+          spikeData_muas.newGlobalUnitIDs = [spikeData_muas.newGlobalUnitIDs numel(spikeData_muas.newGlobalUnitIDs)+1];
+          spikeData_muas.newGlobalUnitCh = [spikeData_muas.newGlobalUnitCh spikes.maxWaveformCh(iUnit)];
+          spikeData_muas.files = [spikeData_muas.files matFilename];
+          spikeData_muas.startTimes = [spikeData_muas.startTimes (nBinFiles-1)*options.chunkDuration];
+          spikeData_muas.types = [spikeData_muas.types 'mua'];
         end
-        spikeData.files = [spikeData.files matFilename];
-        spikeData.startTimes = [spikeData.startTimes spikeData.startTimes(end)];
-        spikeData.types = [spikeData.types 'mua'];
+      end
+    end
+  end
+
+  if ~isempty(spikeData_muas.existingUnitIDs)
+    nUnits = max(spikeData.newGlobalUnitIDs);
+    nEntries = numel(spikeData.newGlobalUnitIDs);
+    for iUnit = 1:numel(spikeData_muas.existingUnitIDs)
+      spikeData.existingUnitIDs = [spikeData.existingUnitIDs spikeData_muas.existingUnitIDs(iUnit)];
+      spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs spikeData_muas.newGlobalUnitIDs(iUnit)+nUnits];
+      spikeData.newGlobalUnitCh = [spikeData.newGlobalUnitCh spikeData_muas.newGlobalUnitCh(iUnit)];
+      spikeData.files{nEntries+iUnit} = spikeData_muas.files{iUnit};
+      spikeData.startTimes = [spikeData.startTimes spikeData_muas.startTimes(iUnit)];
+      spikeData.types{nEntries+iUnit} = spikeData_muas.types{iUnit};
+      chInds = find(ismember(spikeData.newGlobalUnitCh(1:end-1), spikeData.newGlobalUnitCh(end)));
+      if ~isempty(chInds)
+        chInd = chInds(1);
+        spikeData.chLabels{nEntries+iUnit} = spikeData.chLabels{chInd};
+        spikeData.leadLabels{nEntries+iUnit} = spikeData.leadLabels{chInd};
+        spikeData.areaLabels{nEntries+iUnit} = spikeData.areaLabels{chInd};
+        if ~isempty(spikeData.x)
+          spikeData.x = [spikeData.x spikeData.x(chInd)];
+          spikeData.y = [spikeData.y spikeData.y(chInd)];
+          spikeData.z = [spikeData.z spikeData.z(chInd)];
+        end
+      else
+        spikeData.chLabels{nEntries+iUnit} = 'unknown';
+        spikeData.leadLabels{nEntries+iUnit} = 'unknown';
+        spikeData.areaLabels{nEntries+iUnit} = 'unknown';
+        if ~isempty(spikeData.x)
+          spikeData.x = [spikeData.x 0];
+          spikeData.y = [spikeData.y 0];
+          spikeData.z = [spikeData.z 0];
+        end
       end
     end
   end

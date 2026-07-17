@@ -64,7 +64,9 @@ for iUnit = 1:nUnits
   if ~strcmpi(loadedFile,fileToLoad)
     if exist('trackCheckedUnits','var')
       if numel(trackCheckedUnits) ~= ...
-          numel(spikes.cluID(cellfun(@(x) strcmpi(x, 'unit'), spikes.labels)))
+          numel(spikes.cluID(cellfun(@(x) strcmpi(x, 'unit'), spikes.labels))) && ...
+          numel(trackCheckedUnits) ~= ...
+          numel(spikes.cluID(cellfun(@(x) strcmpi(x, 'mua'), spikes.labels)))
         error(['Not all units from the previous CellExplorer file were checked: ' ...
           loadedFile]);
       end
@@ -118,12 +120,38 @@ for iUnit = 1:nUnits
   end
 end
 
+% Delete the existing units table
+file_id = H5F.open(options.outputFile, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+if H5L.exists(file_id, '/units', 'H5P_DEFAULT')
+    H5L.delete(file_id, '/units', 'H5P_DEFAULT');
+end
+H5F.close(file_id);
+
 % Load NWB data
 nwb = nwbRead(nwbFile);
 electrodesTable = nwb.general_extracellular_ephys_electrodes.toTable();
+timeseriesData = nwb.acquisition.get(['TimeSeries_' num2str(spikes.sr) '_Hz']);
+if ~isempty(timeseriesData.timestamps)
+  timestamps = timeseriesData.timestamps.load();
+else
+  t0 = timeseriesData.starting_time;        % seconds, relative to 12AM of the session_start_time day
+  rate = timeseriesData.starting_time_rate; % Hz (samples per second)
+  n = getTimeDim(timeseriesData.data);      % number of samples along the TIME dimension
+  timestamps = t0 + (0:double(n)-1)'/rate;  % column vector of timestamps in seconds
+end
+
+% Remap spike times based on NWB timestamps because kilosort spike sorter
+% uses fixed sampling rate which might not always agree with NWB timestamps
+nUnits = numel(spikesConv.cluID);
+spikesConv.timesNWB = cell(1,nUnits);
+if ~isempty(timestamps)
+  for iUnit = 1:nUnits
+    spikeInds = round(spikesConv.times{iUnit}./(1/spikes.sr));
+    spikesConv.timesNWB{iUnit} = timestamps(spikeInds);
+  end
+end
 
 % Obtain additional channel info
-nUnits = numel(spikesConv.cluID);
 for iUnit = 1:nUnits
   channelInd = find(ismember(electrodesTable.ChName, spikesConv.chLabels{iUnit}));
   if isempty(channelInd)
@@ -147,7 +175,7 @@ end
 % Create units table
 dataDescription = 'Single unit activity';
 [spike_times_vector, spike_times_index] = util.create_indexed_column( ...
-  spikesConv.times', dataDescription);
+  spikesConv.timesNWB', dataDescription);
 
 nwb.units = types.core.Units( ...
   'colnames', { ... % Provide the column order. All column names have to be defined below
@@ -189,12 +217,36 @@ nwb.units = types.core.Units( ...
     'data', spikesConv.group, ...
     'description', 'Recording channel groups'), ...
   'waveform_mean', types.hdmf_common.VectorData( ...
-    'data', cell2mat(spikesConv.filtWaveform), ...
+    'data', cell2mat(cellfun(@(w) w(:), spikesConv.filtWaveform, 'UniformOutput', false)), ...
     'description', ['Mean waveforms on the probe channel with the largest waveform amplitude. ' ...
     'The order that waveforms are stored match the order of units in the unit table.']), ...
   'waveform_sd', types.hdmf_common.VectorData( ...
-    'data', cell2mat(spikesConv.filtWaveformSD), ...
+    'data', cell2mat(cellfun(@(w) w(:), spikesConv.filtWaveformSD, 'UniformOutput', false)), ...
     'description', 'Standard deviation of waveforms.'));
 
 % Save the updated file
 nwbExport(nwb, options.outputFile);
+
+
+
+%% Helper functions
+function n = getTimeDim(data, options)
+% A helper function for extracting the total number of timeseries samples
+
+arguments
+  data
+  options.whichDim (1,1) {isnumeric} = 2 % Columns are sample points (2)
+end
+
+if isa(data, 'types.untyped.DataStub')
+  n = data.dims(options.whichDim);             % lazily-read dataset
+elseif isa(data, 'types.untyped.DataPipe')
+  internal = data.internal;                    % BlueprintPipe or BoundPipe
+  if isprop(internal, 'data') && ~isempty(internal.data)
+    n = size(internal.data, options.whichDim); % in-memory data not yet written
+  else
+    n = internal.dims(options.whichDim);    % already bound to file
+  end
+else
+  n = size(data, options.whichDim);            % plain MATLAB array
+end
