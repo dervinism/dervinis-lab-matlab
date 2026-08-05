@@ -131,23 +131,33 @@ H5F.close(file_id);
 nwb = nwbRead(nwbFile);
 electrodesTable = nwb.general_extracellular_ephys_electrodes.toTable();
 timeseriesData = nwb.acquisition.get(['TimeSeries_' num2str(spikes.sr) '_Hz']);
-if ~isempty(timeseriesData.timestamps)
-  timestamps = timeseriesData.timestamps.load();
-else
-  t0 = timeseriesData.starting_time;        % seconds, relative to 12AM of the session_start_time day
-  rate = timeseriesData.starting_time_rate; % Hz (samples per second)
-  n = getTimeDim(timeseriesData.data);      % number of samples along the TIME dimension
-  timestamps = t0 + (0:double(n)-1)'/rate;  % column vector of timestamps in seconds
-end
 
 % Remap spike times based on NWB timestamps because kilosort spike sorter
-% uses fixed sampling rate which might not always agree with NWB timestamps
+% uses fixed sampling rate which might not always agree with NWB timestamps.
+% Only the specific per-sample timestamps a unit's spikes actually land on
+% are fetched/computed - materializing the full per-sample timestamps
+% vector for the whole session (previously done unconditionally here) ran
+% out of memory on long, high sampling-rate recordings.
 nUnits = numel(spikesConv.cluID);
 spikesConv.timesNWB = cell(1,nUnits);
-if ~isempty(timestamps)
+spikeIndsPerUnit = cell(1,nUnits);
+for iUnit = 1:nUnits
+  spikeIndsPerUnit{iUnit} = round(spikesConv.times{iUnit}./(1/spikes.sr));
+end
+allSpikeInds = cat(1, spikeIndsPerUnit{:});
+if ~isempty(allSpikeInds)
+  if ~isempty(timeseriesData.timestamps)
+    allTimestamps = local_load_timestamps_at_indices(timeseriesData.timestamps, allSpikeInds);
+  else
+    t0 = timeseriesData.starting_time;        % seconds, relative to 12AM of the session_start_time day
+    rate = timeseriesData.starting_time_rate; % Hz (samples per second)
+    allTimestamps = t0 + (double(allSpikeInds) - 1)/rate;
+  end
+  splitPoint = 0;
   for iUnit = 1:nUnits
-    spikeInds = round(spikesConv.times{iUnit}./(1/spikes.sr));
-    spikesConv.timesNWB{iUnit} = timestamps(spikeInds);
+    nSpikes = numel(spikeIndsPerUnit{iUnit});
+    spikesConv.timesNWB{iUnit} = allTimestamps(splitPoint+1:splitPoint+nSpikes);
+    splitPoint = splitPoint + nSpikes;
   end
 end
 
@@ -217,19 +227,107 @@ nwb.units = types.core.Units( ...
     'data', spikesConv.group, ...
     'description', 'Recording channel groups'), ...
   'waveform_mean', types.hdmf_common.VectorData( ...
-    'data', cell2mat(cellfun(@(w) w(:), spikesConv.filtWaveform, 'UniformOutput', false)), ...
+    'data', cat(1, spikesConv.filtWaveform{:}), ...
     'description', ['Mean waveforms on the probe channel with the largest waveform amplitude. ' ...
     'The order that waveforms are stored match the order of units in the unit table.']), ...
   'waveform_sd', types.hdmf_common.VectorData( ...
-    'data', cell2mat(cellfun(@(w) w(:), spikesConv.filtWaveformSD, 'UniformOutput', false)), ...
+    'data', cat(1, spikesConv.filtWaveformSD{:}), ...
     'description', 'Standard deviation of waveforms.'));
 
 % Save the updated file
 nwbExport(nwb, options.outputFile);
 
+% matnwb's generic VectorData export path writes any array with a
+% singleton dimension (e.g. a lone unit's [1, n_samples] waveform) as flat
+% 1-D, violating the NWB schema's required [num_units, num_samples] shape
+% for waveform_mean/waveform_sd whenever there is exactly one unit. Patch
+% those two (tiny) datasets back to 2-D in place — see
+% local_force_units_dim for the full explanation.
+local_force_units_dim(options.outputFile, '/units/waveform_mean');
+local_force_units_dim(options.outputFile, '/units/waveform_sd');
+
 
 
 %% Helper functions
+function timestampsAtIndex = local_load_timestamps_at_indices(timestampsDataStub, indices, options)
+% LOCAL_LOAD_TIMESTAMPS_AT_INDICES  Gather only the per-sample timestamps at
+%   INDICES (1-based, into the full session-length dataset) instead of
+%   materializing the whole array. A session-length, per-sample timestamps
+%   array (tens of kHz over hours) can be tens of GB - too large to even
+%   preallocate in memory on long recordings, let alone read in one
+%   h5read call. Spike sample indices are a tiny fraction of the full
+%   extent, so this sweeps the dataset once in blocks and keeps only the
+%   requested samples from each block.
+%
+%   Uses low-level HDF5 calls with a SINGLE persistent file/dataset handle
+%   for the whole sweep, rather than DataStub/DataPipe's .load() (which
+%   goes through h5read and reopens the file on every call). On a huge
+%   file living on a slow externally-attached disk, hundreds of repeated
+%   file-opens - not the actual data volume - is what made this
+%   prohibitively slow; a persistent handle removes that overhead.
+
+arguments
+  timestampsDataStub
+  indices (:,1) {mustBeNumeric}
+  options.chunkSize (1,1) {isnumeric} = 2e8 % ~1.6GB per chunk of doubles
+end
+
+timestampsAtIndex = nan(size(indices));
+if isempty(indices)
+  return
+end
+
+[filename, datasetPath, n] = local_resolve_h5_dataset(timestampsDataStub);
+
+fileId = H5F.open(filename, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+fileCleanup = onCleanup(@() H5F.close(fileId)); %#ok<NASGU>
+datasetId = H5D.open(fileId, datasetPath);
+datasetCleanup = onCleanup(@() H5D.close(datasetId)); %#ok<NASGU>
+fileSpaceId = H5D.get_space(datasetId);
+spaceCleanup = onCleanup(@() H5S.close(fileSpaceId)); %#ok<NASGU>
+
+nChunks = ceil(n / options.chunkSize);
+ticStart = tic;
+for iChunk = 1:nChunks
+  s = (iChunk-1)*options.chunkSize + 1;
+  c = min(options.chunkSize, n - s + 1);
+  inChunk = indices >= s & indices < s + c;
+  if any(inChunk)
+    H5S.select_hyperslab(fileSpaceId, 'H5S_SELECT_SET', s-1, [], c, []);
+    memSpaceId = H5S.create_simple(1, c, c);
+    chunkData = H5D.read(datasetId, 'H5ML_DEFAULT', memSpaceId, fileSpaceId, 'H5P_DEFAULT');
+    H5S.close(memSpaceId);
+    timestampsAtIndex(inChunk) = chunkData(indices(inChunk) - s + 1);
+  end
+  fprintf('local_load_timestamps_at_indices: chunk %d/%d (%.1f%%), elapsed %.0f s\n', ...
+    iChunk, nChunks, 100*iChunk/nChunks, toc(ticStart));
+end
+
+
+function [filename, datasetPath, n] = local_resolve_h5_dataset(dataStubOrPipe)
+% LOCAL_RESOLVE_H5_DATASET  Extract the on-disk filename, absolute in-file
+%   HDF5 dataset path, and element count (along dimension 1) from either a
+%   types.untyped.DataStub or a file-bound types.untyped.DataPipe, so a
+%   low-level H5F/H5D handle can be opened directly against the dataset.
+if isa(dataStubOrPipe, 'types.untyped.DataStub')
+  filename = dataStubOrPipe.filename;
+  datasetPath = dataStubOrPipe.path;
+  n = dataStubOrPipe.dims(1);
+elseif isa(dataStubOrPipe, 'types.untyped.DataPipe')
+  internal = dataStubOrPipe.internal;
+  assert(isa(internal, 'types.untyped.datapipe.BoundPipe'), ...
+    'NWB:CellExplorer2NWB:UnboundDataPipe', ...
+    ['Expected a file-bound DataPipe when reading timestamps from an ' ...
+    'existing NWB file, but found an unbound (in-memory only) pipe.']);
+  filename = internal.filename;
+  datasetPath = internal.path;
+  n = internal.dims(1);
+else
+  error('NWB:CellExplorer2NWB:UnsupportedTimestampsType', ...
+    'Unsupported timestamps object type: %s', class(dataStubOrPipe));
+end
+
+
 function n = getTimeDim(data, options)
 % A helper function for extracting the total number of timeseries samples
 
@@ -250,3 +348,84 @@ elseif isa(data, 'types.untyped.DataPipe')
 else
   n = size(data, options.whichDim);            % plain MATLAB array
 end
+
+
+function local_force_units_dim(nwbPath, dsPath)
+% LOCAL_FORCE_UNITS_DIM  Ensure a Units waveform_mean/waveform_sd dataset
+%   keeps its [num_units, num_samples] 2-D shape when there is only one
+%   unit.
+%
+%   matnwb's generic VectorData export path (+io/mapData2H5.m) writes any
+%   MATLAB array with a singleton dimension as a flat 1-D HDF5 dataset
+%   unless its internal 'forceMatrix' flag is set — a flag that
+%   types.core.Units' export() never passes for waveform_mean/waveform_sd
+%   (unlike the dedicated ClusterWaveforms neurodata type, which does pass
+%   it for its own, structurally identical, fields). A single-unit waveform
+%   array is exactly [1, num_samples] — one dimension trivially 1 — so this
+%   silently collapses to flat 1-D on export, violating the NWB schema
+%   (core/nwb.misc.yaml: dims [num_units, num_samples]). This only ever
+%   happens when num_units == 1: with more than one unit neither MATLAB
+%   dimension is 1, so matnwb already writes proper 2-D data and this
+%   function is a no-op.
+%
+%   Deleting and recreating the dataset to change its shape also drops its
+%   existing HDF5 attributes (namespace/neurodata_type/object_id/unit/
+%   description — all plain strings for a VectorData object), so those are
+%   captured before the delete and rewritten after; nothing but the
+%   dataspace shape actually changes.
+if ~local_h5_link_exists(nwbPath, dsPath)
+  return
+end
+
+info = h5info(nwbPath, dsPath);
+if numel(info.Dataspace.Size) >= 2
+  return % already >=2-D; nothing to do
+end
+
+data = reshape(h5read(nwbPath, dsPath), 1, []); % -> [num_units=1, num_samples]
+
+attrNames = {info.Attributes.Name};
+attrValues = cell(size(attrNames));
+for iAttr = 1:numel(attrNames)
+  attrValues{iAttr} = char(h5readatt(nwbPath, dsPath, attrNames{iAttr}));
+end
+
+fileID = H5F.open(nwbPath, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+H5L.delete(fileID, dsPath, 'H5P_DEFAULT');
+H5F.close(fileID);
+
+h5create(nwbPath, dsPath, size(data), 'Datatype', class(data));
+h5write(nwbPath, dsPath, data);
+
+fileID = H5F.open(nwbPath, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+datasetID = H5D.open(fileID, dsPath);
+for iAttr = 1:numel(attrNames)
+  local_write_vlen_string_attr(datasetID, attrNames{iAttr}, attrValues{iAttr});
+end
+H5D.close(datasetID);
+H5F.close(fileID);
+
+
+function tf = local_h5_link_exists(nwbPath, dsPath)
+% LOCAL_H5_LINK_EXISTS  Check whether an HDF5 link exists without erroring.
+fileID = H5F.open(nwbPath, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+tf = H5L.exists(fileID, dsPath, 'H5P_DEFAULT');
+H5F.close(fileID);
+
+
+function local_write_vlen_string_attr(objID, name, value)
+% LOCAL_WRITE_VLEN_STRING_ATTR  Write a scalar variable-length UTF-8 string
+%   attribute (mirrors annotatedSz2nwb/inject_implantation_date_into_nwb.m's
+%   helper of the same name, which confirmed this datatype/cset combination
+%   matches matnwb's own attribute convention against a real file).
+typeID = H5T.copy('H5T_C_S1');
+H5T.set_size(typeID, 'H5T_VARIABLE');
+H5T.set_cset(typeID, H5ML.get_constant_value('H5T_CSET_UTF8'));
+spaceID = H5S.create('H5S_SCALAR');
+
+attrID = H5A.create(objID, name, typeID, spaceID, 'H5P_DEFAULT');
+H5A.write(attrID, typeID, {char(value)});
+
+H5A.close(attrID);
+H5S.close(spaceID);
+H5T.close(typeID);

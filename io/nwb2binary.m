@@ -122,7 +122,7 @@ if ~isempty(options.timeseriesGroup) && ischar(options.timeseriesGroup)
 end
 
 % Parameters
-options.segmentSize = 1e8; % samples. 3125 seconds for 32kHz sampling frequency
+options.segmentSize = 1e7; % samples. 312.5 seconds for 32kHz sampling frequency
 options.absAmpSmoothCutoffFactor = 1.05; % baseline factor
 options.artifactExpandSamples = 20; % samples
 options.artifactForwardExpandSamples = 20; % samples
@@ -142,6 +142,15 @@ end
 nGroups = numel(options.timeseriesGroup);
 for iGroup = 1:nGroups
   dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
+
+  % Initialize the per-channel container for periods zeroed out during this group's conversion
+  nChans = size(dataContainer.data,1);
+  zeroedPeriods = cell(nChans, 1);
+  for iChan = 1:nChans
+    zeroedPeriods{iChan} = struct('startIndex', [], 'endIndex', [], ...
+      'startTime', [], 'endTime', [], 'method', {{}});
+  end
+
   % Convert each segment of a timeseries group
   nSegments = ceil(size(dataContainer.data,2)/options.segmentSize);
   if isempty(options.segmentRange)
@@ -155,19 +164,27 @@ for iGroup = 1:nGroups
     segmentInds(segmentInds > size(dataContainer.data,2)) = [];
     timeseriesData = dataContainer.data(:,segmentInds);
     %timeseriesData = dataContainer.data(10:25,segmentInds);
-    samplingRate = dataContainer.starting_time_rate;
-    if isempty(samplingRate)
+    if ~isempty(dataContainer.timestamps)
       timestamps = dataContainer.timestamps(segmentInds)';
       timestamps = timestamps - dataContainer.timestamps(1);
-      samplingRate = 1/median(diff(timestamps));
+      samplingRate = dataContainer.starting_time_rate;
+      if isempty(samplingRate)
+        samplingRate = 1/median(diff(timestamps));
+      end
     else
+      samplingRate = dataContainer.starting_time_rate;
       timestamps = segmentInds./samplingRate;
     end
     if iSegment == segmentRange(1)
-      startTime = timestamps(1);
+      sessionStartTime = timestamps(1);
+      sessionStartIndex = segmentInds(1);
       if ~isempty(options.zeroPeriods)
-        options.zeroPeriods(:,2:3) = options.zeroPeriods(:,2:3) + startTime;
+        options.zeroPeriods(:,2:3) = options.zeroPeriods(:,2:3) + sessionStartTime;
       end
+    end
+    if iSegment == segmentRange(end)
+      sessionEndTime = timestamps(end);
+      sessionEndIndex = segmentInds(end);
     end
 
     % Convert to double
@@ -270,6 +287,8 @@ for iGroup = 1:nGroups
             stimSamplingRate = 1/median(diff(stimTimestamps));
           end
           if any(stimMask)
+            zeroedPeriods = local_append_zeroed_period(zeroedPeriods, 1:nChans, ...
+              logical2intervals(stimMask), segmentInds, timestamps, 'stim');
             for iChan = 1:nChans
               timeseriesData(iChan,stimMask) = median(timeseriesData(iChan,:));
             end
@@ -300,6 +319,8 @@ for iGroup = 1:nGroups
             end
           end
           if any(stimMask)
+            zeroedPeriods = local_append_zeroed_period(zeroedPeriods, iChan, ...
+              logical2intervals(stimMask), segmentInds, timestamps, 'recNormThr');
             %figure;
             %plot(timeseriesData(iChan,:)./max(timeseriesData(iChan,:)));
             %hold on; plot(stimMask); hold off
@@ -323,6 +344,8 @@ for iGroup = 1:nGroups
             end
           end
           if any(stimMask)
+            zeroedPeriods = local_append_zeroed_period(zeroedPeriods, iChan, ...
+              logical2intervals(stimMask), segmentInds, timestamps, 'recAbsThr');
             %figure;
             %plot(timeseriesData./max(timeseriesData(iChan,:)));
             %hold on; plot(stimMask); hold off
@@ -380,6 +403,9 @@ for iGroup = 1:nGroups
               end
             end
             if any(stimMask)
+              zeroedPeriods = local_append_zeroed_period(zeroedPeriods, ...
+                options.channelGroups(chanGroupMask,:), logical2intervals(stimMask), ...
+                segmentInds, timestamps, 'amp');
               %figure;
               %plot(timeseriesData./max(timeseriesData(iChan,:)));
               %hold on; plot(stimMask); hold off
@@ -405,6 +431,17 @@ for iGroup = 1:nGroups
             inds(2) = inf;
           else
             inds(2) = find(timestamps - options.zeroPeriods(iPeriod,3) > 0, 1);
+          end
+          clippedEndInd = inds(2);
+          if isinf(clippedEndInd)
+            clippedEndInd = numel(timestamps);
+          end
+          if options.zeroPeriods(iPeriod,1)
+            zeroedPeriods = local_append_zeroed_period(zeroedPeriods, options.zeroPeriods(iPeriod,1), ...
+              [inds(1) clippedEndInd], segmentInds, timestamps, 'zeroPeriods');
+          else
+            zeroedPeriods = local_append_zeroed_period(zeroedPeriods, 1:nChans, ...
+              [inds(1) clippedEndInd], segmentInds, timestamps, 'zeroPeriods');
           end
           if options.zeroPeriods(iPeriod,1)
             if isinf(inds(2))
@@ -477,9 +514,90 @@ for iGroup = 1:nGroups
       fclose(fid);
     end
   end
+
+  % Consolidate zeroed periods and save binary generation parameters (for replication)
+  for iChan = 1:nChans
+    zeroedPeriods{iChan} = local_merge_zeroed_periods(zeroedPeriods{iChan});
+  end
+  procTime = datetime;
+  matFile = [outputFile_group(1:end-4) '.mat'];
+  save(matFile, 'inputFile', 'outputFile', 'options', 'nChans', 'procTime', 'zeroedPeriods', ...
+    'sessionStartTime', 'sessionEndTime', 'sessionStartIndex', 'sessionEndIndex', 'samplingRate', '-v7.3');
 end
 
-% Save binary generation parameters (for replication)
-procTime = datetime;
-matFile = [outputFile_group(1:end-4) '.mat'];
-save(matFile, 'inputFile', 'outputFile', 'options', 'nChans', 'procTime', '-v7.3');
+
+%% Helper functions
+function zeroedPeriods = local_append_zeroed_period(zeroedPeriods, channels, localIntervals, segmentInds, timestamps, method)
+% LOCAL_APPEND_ZEROED_PERIOD  Append one or more zeroed sample intervals to
+%   the accumulated per-channel record. LOCALINTERVALS is an Nx2 array of
+%   [onset offset] sample indices local to the current segment (as returned
+%   by logical2intervals) - each row is mapped to the global,
+%   session-relative sample index (via SEGMENTINDS) and time (via
+%   TIMESTAMPS) before being recorded against every channel in CHANNELS.
+for iInterval = 1:size(localIntervals,1)
+  startIndex = segmentInds(localIntervals(iInterval,1));
+  endIndex = segmentInds(localIntervals(iInterval,2));
+  startTime = timestamps(localIntervals(iInterval,1));
+  endTime = timestamps(localIntervals(iInterval,2));
+  for iChan = channels(:)'
+    zeroedPeriods{iChan}.startIndex(end+1,1) = startIndex;
+    zeroedPeriods{iChan}.endIndex(end+1,1) = endIndex;
+    zeroedPeriods{iChan}.startTime(end+1,1) = startTime;
+    zeroedPeriods{iChan}.endTime(end+1,1) = endTime;
+    zeroedPeriods{iChan}.method{end+1,1} = method;
+  end
+end
+
+
+function mergedPeriods = local_merge_zeroed_periods(channelPeriods)
+% LOCAL_MERGE_ZEROED_PERIODS  Collapse one channel's accumulated zeroed
+%   periods (possibly split across segment boundaries or duplicated by
+%   explicit zeroPeriods reapplied over several overlapping segments) into
+%   non-overlapping intervals, separately per zeroing METHOD. Returns a
+%   table with columns startIndex, endIndex, startTime, endTime, method.
+mergedStartIndex = zeros(0,1);
+mergedEndIndex = zeros(0,1);
+mergedStartTime = zeros(0,1);
+mergedEndTime = zeros(0,1);
+mergedMethod = cell(0,1);
+
+methods = unique(channelPeriods.method);
+for iMethod = 1:numel(methods)
+  rowMask = strcmp(channelPeriods.method, methods{iMethod});
+  [sortedStartIndex, sortOrder] = sort(channelPeriods.startIndex(rowMask));
+  subsetEndIndex = channelPeriods.endIndex(rowMask);
+  subsetEndIndex = subsetEndIndex(sortOrder);
+  subsetStartTime = channelPeriods.startTime(rowMask);
+  subsetStartTime = subsetStartTime(sortOrder);
+  subsetEndTime = channelPeriods.endTime(rowMask);
+  subsetEndTime = subsetEndTime(sortOrder);
+
+  currentStartIndex = sortedStartIndex(1);
+  currentEndIndex = subsetEndIndex(1);
+  currentStartTime = subsetStartTime(1);
+  currentEndTime = subsetEndTime(1);
+  for iRow = 2:numel(sortedStartIndex)
+    if sortedStartIndex(iRow) <= currentEndIndex + 1
+      currentEndIndex = max(currentEndIndex, subsetEndIndex(iRow));
+      currentEndTime = max(currentEndTime, subsetEndTime(iRow));
+    else
+      mergedStartIndex(end+1,1) = currentStartIndex; %#ok<*AGROW>
+      mergedEndIndex(end+1,1) = currentEndIndex;
+      mergedStartTime(end+1,1) = currentStartTime;
+      mergedEndTime(end+1,1) = currentEndTime;
+      mergedMethod{end+1,1} = methods{iMethod};
+      currentStartIndex = sortedStartIndex(iRow);
+      currentEndIndex = subsetEndIndex(iRow);
+      currentStartTime = subsetStartTime(iRow);
+      currentEndTime = subsetEndTime(iRow);
+    end
+  end
+  mergedStartIndex(end+1,1) = currentStartIndex;
+  mergedEndIndex(end+1,1) = currentEndIndex;
+  mergedStartTime(end+1,1) = currentStartTime;
+  mergedEndTime(end+1,1) = currentEndTime;
+  mergedMethod{end+1,1} = methods{iMethod};
+end
+
+mergedPeriods = table(mergedStartIndex, mergedEndIndex, mergedStartTime, mergedEndTime, mergedMethod, ...
+  'VariableNames', {'startIndex','endIndex','startTime','endTime','method'});
