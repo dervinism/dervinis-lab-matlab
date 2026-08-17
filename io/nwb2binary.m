@@ -73,14 +73,37 @@ function nwb2binary(inputFile, outputFile, options)
 %   dataConversionFactor (numeric, optional, keyword): a shape-(1, 1)
 %     numeric scalar used to multiple data to convert it into appropriate
 %     precision format (default=1).
-%   car (logical, optional, keyword): a shape-(1, 1) logical scalar
-%     controlling the application of the common average reference (CAR).
-%     Referencing is applied on a per lead basis described in
-%     channelGroups (default=false).
+%   car (char, optional, keyword): a shape-(1, m) character array
+%     controlling the type of common average referencing (CAR) applied to
+%     the data, if any. Available options include:
+%       'none' - no CAR is applied;
+%       'averagePerLead' - each channel is first centred by subtracting
+%                          its own across-time mean, then the
+%                          across-channel mean (computed per lead group,
+%                          as defined by channelGroups) is subtracted from
+%                          every channel in that lead;
+%       'medianPerLead' - same as 'averagePerLead' but using the median
+%                         instead of the mean at both steps;
+%       'averagePerRecording' - same as 'averagePerLead' but treating all
+%                               channels in the recording as a single
+%                               group for the across-channel referencing
+%                               step (channelGroups is ignored for this
+%                               step);
+%       'medianPerRecording' - same as 'medianPerLead' but treating all
+%                              channels in the recording as a single group
+%                              for the across-channel referencing step
+%                              (channelGroups is ignored for this step)
+%                              (default).
 %   channelGroups (numeric, optional, keyword): a shape-(f, g) numeric
 %     array of channel groups. Rows correspond tetrodes and columns
 %     correspond to individual channels. By default assumes consequtive
 %     tetrode channel pairings.
+%   segmentSize (numeric, optional, keyword): a shape-(1, 1) numeric
+%     positive integer scalar specifying the number of samples read,
+%     processed, and written to the binary file per segment/chunk. Larger
+%     values reduce loop overhead and the number of disk I/O calls at the
+%     cost of higher peak memory use. Default is 1e8 samples (~3125 s,
+%     i.e. ~52 min, at 32 kHz sampling frequency).
 %   segmentRange (numeric, optional, keyword): a shape-(1, 2) numeric array
 %     defining segment range for saving inclusively. If left empty, all
 %     segments are saved within a single file (default).
@@ -111,8 +134,9 @@ arguments
   options.zeroPeriods (:,:) {mustBeNumeric} = []
   options.visualiseData (1,1) {islogical} = false
   options.dataConversionFactor (1,1) {mustBePositive} = 1
-  options.car (1,1) {islogical} = false
+  options.car (1,:) {mustBeMember(options.car, {'none','averagePerLead','medianPerLead','averagePerRecording','medianPerRecording'})} = 'none'
   options.channelGroups (:,:) {mustBePositive} = [1:4; 5:8; 9:12; 13:16; 17:20; 21:24; 25:28; 29:32];
+  options.segmentSize (1,1) {mustBePositive, mustBeInteger} = 1e8
   options.segmentRange (:,:) {mustBeNumeric} = []
 end
 
@@ -122,7 +146,6 @@ if ~isempty(options.timeseriesGroup) && ischar(options.timeseriesGroup)
 end
 
 % Parameters
-options.segmentSize = 1e7; % samples. 312.5 seconds for 32kHz sampling frequency
 options.absAmpSmoothCutoffFactor = 1.05; % baseline factor
 options.artifactExpandSamples = 20; % samples
 options.artifactForwardExpandSamples = 20; % samples
@@ -219,43 +242,23 @@ for iGroup = 1:nGroups
     % Subtract CAR
     nChans = size(timeseriesData,1);
     options.channelGroups(nChans/4+1:end,:) = [];
-    if options.car
-      if size(options.channelGroups,1) == 1
-        leadGroups = options.channelGroups(1,:);
-      elseif size(options.channelGroups,1) == 2
-        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:)];
-      elseif size(options.channelGroups,1) == 4
-        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
-                      options.channelGroups(3,:) options.channelGroups(4,:)];
-      elseif size(options.channelGroups,1) == 5
-        % leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:) options.channelGroups(3,:); ...
-        %               options.channelGroups(4,:) options.channelGroups(5,:) options.channelGroups(5,:)];
-        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:) options.channelGroups(2,:); ...
-                      options.channelGroups(3,:) options.channelGroups(4,:) options.channelGroups(5,:)];
-      elseif size(options.channelGroups,1) == 6
-        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
-                      options.channelGroups(3,:) options.channelGroups(4,:); ...
-                      options.channelGroups(5,:) options.channelGroups(6,:)];
-      elseif size(options.channelGroups,1) == 8
-        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
-                      options.channelGroups(3,:) options.channelGroups(4,:); ...
-                      options.channelGroups(5,:) options.channelGroups(6,:); ...
-                      options.channelGroups(7,:) options.channelGroups(8,:)];
-      elseif size(options.channelGroups,1) == 10
-        leadGroups = [options.channelGroups(1,:) options.channelGroups(2,:); ...
-                      options.channelGroups(3,:) options.channelGroups(4,:); ...
-                      options.channelGroups(5,:) options.channelGroups(6,:); ...
-                      options.channelGroups(7,:) options.channelGroups(8,:); ...
-                      options.channelGroups(9,:) options.channelGroups(10,:)];
+    if ~strcmpi(options.car, 'none')
+      if contains(options.car, 'average')
+        statFcn = @(data, dim) mean(data, dim, 'omitnan');
+      else
+        statFcn = @(data, dim) median(data, dim, 'omitnan');
       end
-      for iLead = 1:size(leadGroups,1)
-        [~, chanInds] = unique(leadGroups(iLead,:));
-        medianChannel = median(timeseriesData(leadGroups(iLead,chanInds),:), 2, 'omitnan');
-        timeseriesData(leadGroups(iLead,chanInds),:) = bsxfun( ...
-          @minus, timeseriesData(leadGroups(iLead,chanInds),:), medianChannel);
-        medianTrace = median(timeseriesData(leadGroups(iLead,chanInds),:), 1, 'omitnan');
-        timeseriesData(leadGroups(iLead,chanInds),:) = bsxfun( ...
-          @minus, timeseriesData(leadGroups(iLead,chanInds),:), medianTrace);
+      if endsWith(options.car, 'PerLead')
+        referenceGroups = local_build_lead_groups(options.channelGroups);
+      else % 'averagePerRecording' or 'medianPerRecording'
+        referenceGroups = 1:nChans;
+      end
+      for iRefGroup = 1:size(referenceGroups,1)
+        groupChans = unique(referenceGroups(iRefGroup,:));
+        channelBaseline = statFcn(timeseriesData(groupChans,:), 2);
+        timeseriesData(groupChans,:) = timeseriesData(groupChans,:) - channelBaseline;
+        groupReference = statFcn(timeseriesData(groupChans,:), 1);
+        timeseriesData(groupChans,:) = timeseriesData(groupChans,:) - groupReference;
       end
     end
 
@@ -601,3 +604,40 @@ end
 
 mergedPeriods = table(mergedStartIndex, mergedEndIndex, mergedStartTime, mergedEndTime, mergedMethod, ...
   'VariableNames', {'startIndex','endIndex','startTime','endTime','method'});
+
+
+function leadGroups = local_build_lead_groups(channelGroups)
+% LOCAL_BUILD_LEAD_GROUPS  Reshape a (f, g) channelGroups array (rows =
+%   tetrodes/shanks, columns = individual channels) into a per-lead
+%   grouping used for CAR referencing. The pairing of tetrode rows into
+%   leads depends on the number of tetrode rows (f).
+if size(channelGroups,1) == 1
+  leadGroups = channelGroups(1,:);
+elseif size(channelGroups,1) == 2
+  leadGroups = [channelGroups(1,:) channelGroups(2,:)];
+elseif size(channelGroups,1) == 4
+  leadGroups = [channelGroups(1,:) channelGroups(2,:); ...
+                channelGroups(3,:) channelGroups(4,:)];
+elseif size(channelGroups,1) == 5
+  leadGroups = [channelGroups(1,:) channelGroups(2,:) channelGroups(2,:); ...
+                channelGroups(3,:) channelGroups(4,:) channelGroups(5,:)];
+elseif size(channelGroups,1) == 6
+  leadGroups = [channelGroups(1,:) channelGroups(2,:); ...
+                channelGroups(3,:) channelGroups(4,:); ...
+                channelGroups(5,:) channelGroups(6,:)];
+elseif size(channelGroups,1) == 8
+  leadGroups = [channelGroups(1,:) channelGroups(2,:); ...
+                channelGroups(3,:) channelGroups(4,:); ...
+                channelGroups(5,:) channelGroups(6,:); ...
+                channelGroups(7,:) channelGroups(8,:)];
+elseif size(channelGroups,1) == 10
+  leadGroups = [channelGroups(1,:) channelGroups(2,:); ...
+                channelGroups(3,:) channelGroups(4,:); ...
+                channelGroups(5,:) channelGroups(6,:); ...
+                channelGroups(7,:) channelGroups(8,:); ...
+                channelGroups(9,:) channelGroups(10,:)];
+else
+  error('nwb2binary:unsupportedChannelGroups', ...
+    ['CAR per-lead referencing does not support channelGroups with %d ' ...
+    'rows. Supported row counts are 1, 2, 4, 5, 6, 8, or 10.'], size(channelGroups,1));
+end
