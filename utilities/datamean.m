@@ -66,7 +66,7 @@ end
 if strcmp(meanType, 'regular') % regular means
   dataMean = mean(data, 1, 'omitnan');
   dataStd = std(data, 1, 'omitnan');
-  dataSEM = dataStd ./ counts;
+  dataSEM = dataStd ./ sqrt(counts);
   CI95 = zeros(2,F); % regular confidence intervals
   dataCI95 = zeros(2,F);
   for f = 1:F
@@ -92,7 +92,7 @@ elseif strcmp(meanType, 'circular') || strcmp(meanType, 'circularNP') % circular
     if sum(dataExist)
       dataMean(j) = circmean(data(:,j));
       dataStd(j) = std(data(dataExist,j));
-      dataSEM(j) = dataStd(j) ./ counts(j);
+      dataSEM(j) = dataStd(j) ./ sqrt(counts(j));
       if strcmp(meanType, 'circular')
         dataCI95(2,j) = circ_confmean(data(~isnan(data(:,j)),j), alpha); % parametric circular confidence intervals
       elseif strcmp(meanType, 'circularNP')

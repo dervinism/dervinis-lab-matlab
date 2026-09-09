@@ -35,6 +35,7 @@ function cellexplorer2nwb(spikeData, nwbFile, options)
 %
 % Dependencies:
 %   matnwb (https://neurodatawithoutborders.github.io/matnwb/)
+%   resolveTimestampsAtIndices.m (this repo's io folder)
 %
 % Authors:
 %   Martynas Dervinis (martynas.dervinis@gmail.com).
@@ -146,13 +147,7 @@ for iUnit = 1:nUnits
 end
 allSpikeInds = cat(1, spikeIndsPerUnit{:});
 if ~isempty(allSpikeInds)
-  if ~isempty(timeseriesData.timestamps)
-    allTimestamps = local_load_timestamps_at_indices(timeseriesData.timestamps, allSpikeInds);
-  else
-    t0 = timeseriesData.starting_time;        % seconds, relative to 12AM of the session_start_time day
-    rate = timeseriesData.starting_time_rate; % Hz (samples per second)
-    allTimestamps = t0 + (double(allSpikeInds) - 1)/rate;
-  end
+  allTimestamps = resolveTimestampsAtIndices(timeseriesData, allSpikeInds);
   splitPoint = 0;
   for iUnit = 1:nUnits
     nSpikes = numel(spikeIndsPerUnit{iUnit});
@@ -183,6 +178,15 @@ for iUnit = 1:nUnits
 end
 
 % Create units table
+% waveform_mean/waveform_sd below are transposed to [num_samples, num_units]:
+% matnwb's DynamicTable row-height check for matrix-valued columns
+% (types.util.dynamictable.internal.getColumnHeight) takes the LAST MATLAB
+% dimension as the row count, and its HDF5 writer reverses dimension order
+% on export - so a [num_samples, num_units] in-memory array is what ends up
+% on disk as the schema-required [num_units, num_samples]. Building these
+% as [num_units, num_samples] instead (the untransposed, more "natural"
+% orientation) silently passes the height check only when num_samples
+% happens to equal num_units, and errors otherwise.
 dataDescription = 'Single unit activity';
 [spike_times_vector, spike_times_index] = util.create_indexed_column( ...
   spikesConv.timesNWB', dataDescription);
@@ -227,11 +231,11 @@ nwb.units = types.core.Units( ...
     'data', spikesConv.group, ...
     'description', 'Recording channel groups'), ...
   'waveform_mean', types.hdmf_common.VectorData( ...
-    'data', cat(1, spikesConv.filtWaveform{:}), ...
+    'data', cat(1, spikesConv.filtWaveform{:}).', ...
     'description', ['Mean waveforms on the probe channel with the largest waveform amplitude. ' ...
     'The order that waveforms are stored match the order of units in the unit table.']), ...
   'waveform_sd', types.hdmf_common.VectorData( ...
-    'data', cat(1, spikesConv.filtWaveformSD{:}), ...
+    'data', cat(1, spikesConv.filtWaveformSD{:}).', ...
     'description', 'Standard deviation of waveforms.'));
 
 % Save the updated file
@@ -249,85 +253,6 @@ local_force_units_dim(options.outputFile, '/units/waveform_sd');
 
 
 %% Helper functions
-function timestampsAtIndex = local_load_timestamps_at_indices(timestampsDataStub, indices, options)
-% LOCAL_LOAD_TIMESTAMPS_AT_INDICES  Gather only the per-sample timestamps at
-%   INDICES (1-based, into the full session-length dataset) instead of
-%   materializing the whole array. A session-length, per-sample timestamps
-%   array (tens of kHz over hours) can be tens of GB - too large to even
-%   preallocate in memory on long recordings, let alone read in one
-%   h5read call. Spike sample indices are a tiny fraction of the full
-%   extent, so this sweeps the dataset once in blocks and keeps only the
-%   requested samples from each block.
-%
-%   Uses low-level HDF5 calls with a SINGLE persistent file/dataset handle
-%   for the whole sweep, rather than DataStub/DataPipe's .load() (which
-%   goes through h5read and reopens the file on every call). On a huge
-%   file living on a slow externally-attached disk, hundreds of repeated
-%   file-opens - not the actual data volume - is what made this
-%   prohibitively slow; a persistent handle removes that overhead.
-
-arguments
-  timestampsDataStub
-  indices (:,1) {mustBeNumeric}
-  options.chunkSize (1,1) {isnumeric} = 2e8 % ~1.6GB per chunk of doubles
-end
-
-timestampsAtIndex = nan(size(indices));
-if isempty(indices)
-  return
-end
-
-[filename, datasetPath, n] = local_resolve_h5_dataset(timestampsDataStub);
-
-fileId = H5F.open(filename, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
-fileCleanup = onCleanup(@() H5F.close(fileId)); %#ok<NASGU>
-datasetId = H5D.open(fileId, datasetPath);
-datasetCleanup = onCleanup(@() H5D.close(datasetId)); %#ok<NASGU>
-fileSpaceId = H5D.get_space(datasetId);
-spaceCleanup = onCleanup(@() H5S.close(fileSpaceId)); %#ok<NASGU>
-
-nChunks = ceil(n / options.chunkSize);
-ticStart = tic;
-for iChunk = 1:nChunks
-  s = (iChunk-1)*options.chunkSize + 1;
-  c = min(options.chunkSize, n - s + 1);
-  inChunk = indices >= s & indices < s + c;
-  if any(inChunk)
-    H5S.select_hyperslab(fileSpaceId, 'H5S_SELECT_SET', s-1, [], c, []);
-    memSpaceId = H5S.create_simple(1, c, c);
-    chunkData = H5D.read(datasetId, 'H5ML_DEFAULT', memSpaceId, fileSpaceId, 'H5P_DEFAULT');
-    H5S.close(memSpaceId);
-    timestampsAtIndex(inChunk) = chunkData(indices(inChunk) - s + 1);
-  end
-  fprintf('local_load_timestamps_at_indices: chunk %d/%d (%.1f%%), elapsed %.0f s\n', ...
-    iChunk, nChunks, 100*iChunk/nChunks, toc(ticStart));
-end
-
-
-function [filename, datasetPath, n] = local_resolve_h5_dataset(dataStubOrPipe)
-% LOCAL_RESOLVE_H5_DATASET  Extract the on-disk filename, absolute in-file
-%   HDF5 dataset path, and element count (along dimension 1) from either a
-%   types.untyped.DataStub or a file-bound types.untyped.DataPipe, so a
-%   low-level H5F/H5D handle can be opened directly against the dataset.
-if isa(dataStubOrPipe, 'types.untyped.DataStub')
-  filename = dataStubOrPipe.filename;
-  datasetPath = dataStubOrPipe.path;
-  n = dataStubOrPipe.dims(1);
-elseif isa(dataStubOrPipe, 'types.untyped.DataPipe')
-  internal = dataStubOrPipe.internal;
-  assert(isa(internal, 'types.untyped.datapipe.BoundPipe'), ...
-    'NWB:CellExplorer2NWB:UnboundDataPipe', ...
-    ['Expected a file-bound DataPipe when reading timestamps from an ' ...
-    'existing NWB file, but found an unbound (in-memory only) pipe.']);
-  filename = internal.filename;
-  datasetPath = internal.path;
-  n = internal.dims(1);
-else
-  error('NWB:CellExplorer2NWB:UnsupportedTimestampsType', ...
-    'Unsupported timestamps object type: %s', class(dataStubOrPipe));
-end
-
-
 function n = getTimeDim(data, options)
 % A helper function for extracting the total number of timeseries samples
 

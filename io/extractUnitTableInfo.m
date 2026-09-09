@@ -1,5 +1,5 @@
-function spikeData = extractUnitTableInfo(binaryFileBasename, unitTableFile, options)
-% extractUnitTableInfo(binaryFileBasename, unitTableFile, <chunkDuration>)
+function spikeData = extractUnitTableInfo(binaryFileBasename, unitTableFile)
+% extractUnitTableInfo(binaryFileBasename, unitTableFile)
 %
 % Function extracts some useful info about recorded units from a custom
 % Excel file.
@@ -10,9 +10,13 @@ function spikeData = extractUnitTableInfo(binaryFileBasename, unitTableFile, opt
 %     files.
 %   unitTableFile (char, required, positional): a shape-(1, m) character
 %     array containing the path to the unit table Excel file.
-%   chunkDuration (numeric, optional, keyword): a shape-(1, 1) numeric
-%     scalar containing the data chunk duration in seconds corresponding to
-%     a single spike sorted binary file. Default is 3125 seconds.
+%
+% Each chunk's start time is read from its own companion conversion .mat
+% file (saved by nwb2binary.m alongside the chunk's binary data), which
+% is required to exist - this replaces the previous chunkDuration-based
+% assumption that every chunk spans the same duration, which silently
+% produced wrong start times whenever chunk folders span different
+% numbers of raw segments.
 %
 % Returns:
 %   spikeData (struct): a shape-(1, 1) Matlab scalar structure with the
@@ -33,7 +37,6 @@ function spikeData = extractUnitTableInfo(binaryFileBasename, unitTableFile, opt
 arguments
   binaryFileBasename (1,:) {mustBeA(binaryFileBasename,'char'),mustBeVector}
   unitTableFile (1,:) {mustBeA(unitTableFile,'char'),mustBeVector}
-  options.chunkDuration (1,1) {mustBePositive} = 3125
 end
 
 % Load the unit table
@@ -80,18 +83,50 @@ else
   nBinFiles = 0;
   nColumns = size(unitTable,2);
   labels = unitTable.Properties.VariableNames;
+
+  % Locate the trailing 'Total:' summary row (first column reads 'Total:')
+  % and treat every row from it downwards as non-data. Previously the code
+  % simply dropped the final table row, which only worked while 'Total:'
+  % happened to be the last row of Excel's used range - any blank row or
+  % stray cell below it left the Total row in place, and its per-chunk unit
+  % COUNTS were then misread as Phy cluster IDs.
+  tableHeight = height(unitTable);
+  firstCol = unitTable.(labels{1});
+  if ~iscell(firstCol)
+    firstCol = cellstr(string(firstCol));
+  end
+  totalRowIdx = find(~cellfun('isempty', regexpi(strtrim(firstCol), '^total', 'once')), 1);
+  if isempty(totalRowIdx)
+    nDataRows = tableHeight - 1; % preserve previous behaviour: drop the last row
+  else
+    nDataRows = totalRowIdx - 1;
+  end
+
   for iColumn = 1:nColumns
     label = labels{iColumn};
     columnData = unitTable.(label)';
-    columnData = columnData(1:end-1);
-    if isnumeric(columnData)
+    columnData = columnData(1:nDataRows);
+    if iscell(columnData)
+      % A column reads back as a cell array of char instead of numeric
+      % double whenever Excel/readtable sees mixed cell formatting within
+      % that column (e.g. some numeric-looking values entered/pasted as
+      % text) - even a single such cell makes readtable treat the whole
+      % column this way. Blank cells then come back as '' rather than
+      % NaN, so they must be masked out explicitly here instead of being
+      % (incorrectly) treated as valid entries.
+      isEntryMissing = cellfun(@(x) isempty(x) || (ischar(x) && isempty(strtrim(x))), columnData);
+      numericColumnData = nan(1, numel(columnData));
+      numericColumnData(~isEntryMissing) = str2double(columnData(~isEntryMissing));
+      columnData = numericColumnData;
+      valueMask = ~isnan(columnData);
+    elseif isnumeric(columnData)
       valueMask = ~isnan(columnData);
     else
       valueMask = true(1,numel(columnData));
     end
     nUnits = sum(valueMask);
     columnData = columnData(valueMask);
-    valueMask = [valueMask false]; %#ok<AGROW>
+    valueMask = [valueMask false(1, tableHeight - nDataRows)]; %#ok<AGROW>
     if (startsWith(label, 'x') || startsWith(label, '_')) && (endsWith(label, 'Id') || endsWith(label, 'id'))
       nBinFiles = nBinFiles + 1;
       spikeData.existingUnitIDs = [spikeData.existingUnitIDs columnData];
@@ -101,13 +136,38 @@ else
       spikeData.leadLabels = [spikeData.leadLabels unitTable.leadLabel(valueMask)'];
       spikeData.areaLabels = [spikeData.areaLabels unitTable.areaLabel(valueMask)'];
       try
-        matFilename = [binaryFileBasename label(2:8) filesep 'temp_wh.spikes.cellinfo.mat'];
+        chunkFolder = [binaryFileBasename label(2:8)];
+        matFilename = [chunkFolder filesep 'temp_wh.spikes.cellinfo.mat'];
       catch
+        chunkFolder = binaryFileBasename;
         matFilename = [binaryFileBasename filesep 'temp_wh.spikes.cellinfo.mat'];
       end
+
+      % Determine this chunk's start time from nwb2binary.m's own
+      % conversion record (the chunk folder's companion .mat file) rather
+      % than assuming every chunk spans the same chunkDuration. Segment-
+      % range folders are not guaranteed to be equal width (e.g. a
+      % recording's chunks may span 40/20/20/20/7 raw segments
+      % respectively), in which case a single chunkDuration cannot give
+      % correct start times for every chunk. There is no safe fallback
+      % for a missing conversion file - guessing via chunkDuration is
+      % exactly the assumption that silently breaks on non-uniform chunks
+      % - so this errors instead.
+      [~, chunkFolderName] = fileparts(chunkFolder);
+      conversionMatFile = fullfile(chunkFolder, [chunkFolderName '.mat']);
+      if ~isfile(conversionMatFile)
+        error('extractUnitTableInfo:missingConversionFile', ...
+          ['No companion conversion .mat file found for chunk folder %s ' ...
+          '(expected %s). This file is produced by nwb2binary.m and is ' ...
+          'required to determine the chunk''s true start time.'], ...
+          chunkFolder, conversionMatFile);
+      end
+      conversionInfo = load(conversionMatFile, 'sessionStartTime'); %#ok<*LOAD>
+      chunkStartTime = conversionInfo.sessionStartTime;
+
       for iUnit = 1:nUnits
         spikeData.files = [spikeData.files matFilename];
-        spikeData.startTimes = [spikeData.startTimes (nBinFiles-1)*options.chunkDuration];
+        spikeData.startTimes = [spikeData.startTimes chunkStartTime];
         spikeData.types = [spikeData.types 'unit'];
       end
       try
@@ -125,7 +185,7 @@ else
           spikeData_muas.newGlobalUnitIDs = [spikeData_muas.newGlobalUnitIDs numel(spikeData_muas.newGlobalUnitIDs)+1];
           spikeData_muas.newGlobalUnitCh = [spikeData_muas.newGlobalUnitCh spikes.maxWaveformCh(iUnit)];
           spikeData_muas.files = [spikeData_muas.files matFilename];
-          spikeData_muas.startTimes = [spikeData_muas.startTimes (nBinFiles-1)*options.chunkDuration];
+          spikeData_muas.startTimes = [spikeData_muas.startTimes chunkStartTime];
           spikeData_muas.types = [spikeData_muas.types 'mua'];
         end
       end

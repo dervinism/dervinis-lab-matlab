@@ -181,6 +181,20 @@ for iGroup = 1:nGroups
   else
     segmentRange = options.segmentRange(1):min([options.segmentRange(2) nSegments]);
   end
+
+  % Determine the output binary filename and its matching .mat filename up
+  % front (rather than recomputing every segment) so they're known even if
+  % segment processing fails before reaching the save step below.
+  [~,~,ext] = fileparts(outputFile);
+  if isempty(options.segmentRange)
+    suffix = '';
+  else
+    suffix = ['_segments_' num2str(segmentRange(1)) '_' num2str(segmentRange(end))];
+  end
+  outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} suffix ext];
+  matFile = [outputFile_group(1:end-4) '.mat'];
+
+  try
   for iSegment = segmentRange
     disp(['Segment ' num2str(iSegment) '/' num2str(nSegments)]);
     segmentInds = (1:options.segmentSize) + (iSegment-1)*options.segmentSize;
@@ -495,13 +509,6 @@ for iGroup = 1:nGroups
     end
 
     % Save the binary file
-    [~,~,ext] = fileparts(outputFile);
-    if isempty(options.segmentRange)
-      suffix = '';
-    else
-      suffix = ['_segments_' num2str(segmentRange(1)) '_' num2str(segmentRange(end))];
-    end
-    outputFile_group = [outputFile(1:end-4) '_' options.timeseriesGroup{iGroup} suffix ext];
     if strcmpi(dataType, options.precision) || ~isempty(options.precision)
       timeseriesData = cast(timeseriesData, options.precision);
     else
@@ -517,19 +524,65 @@ for iGroup = 1:nGroups
       fclose(fid);
     end
   end
+  catch ME
+    % Segment processing failed partway through: close any still-open
+    % binary file handle, save whatever processing metadata is available
+    % (rather than losing it), and rethrow so the caller still sees the
+    % original error exactly as before.
+    if exist('fid', 'var')
+      try
+        fclose(fid);
+      catch
+        % fid was never opened or is already closed/invalid - nothing to do
+      end
+    end
+    if ~exist('sessionStartTime', 'var');  sessionStartTime  = [];  end
+    if ~exist('sessionEndTime', 'var');    sessionEndTime    = [];  end
+    if ~exist('sessionStartIndex', 'var'); sessionStartIndex = [];  end
+    if ~exist('sessionEndIndex', 'var');   sessionEndIndex   = [];  end
+    if ~exist('samplingRate', 'var');      samplingRate      = [];  end
+    for iChan = 1:numel(zeroedPeriods)
+      if isstruct(zeroedPeriods{iChan})
+        zeroedPeriods{iChan} = local_merge_zeroed_periods(zeroedPeriods{iChan});
+      end
+    end
+    if exist('iSegment', 'var')
+      failedSegment = iSegment;
+    else
+      failedSegment = [];
+    end
+    local_save_matfile(matFile, inputFile, outputFile, options, nChans, zeroedPeriods, ...
+      sessionStartTime, sessionEndTime, sessionStartIndex, sessionEndIndex, samplingRate, ...
+      false, getReport(ME), failedSegment);
+    rethrow(ME);
+  end
 
   % Consolidate zeroed periods and save binary generation parameters (for replication)
   for iChan = 1:nChans
     zeroedPeriods{iChan} = local_merge_zeroed_periods(zeroedPeriods{iChan});
   end
-  procTime = datetime;
-  matFile = [outputFile_group(1:end-4) '.mat'];
-  save(matFile, 'inputFile', 'outputFile', 'options', 'nChans', 'procTime', 'zeroedPeriods', ...
-    'sessionStartTime', 'sessionEndTime', 'sessionStartIndex', 'sessionEndIndex', 'samplingRate', '-v7.3');
+  local_save_matfile(matFile, inputFile, outputFile, options, nChans, zeroedPeriods, ...
+    sessionStartTime, sessionEndTime, sessionStartIndex, sessionEndIndex, samplingRate, ...
+    true, '', []);
 end
 
 
 %% Helper functions
+function local_save_matfile(matFile, inputFile, outputFile, options, nChans, zeroedPeriods, ...
+    sessionStartTime, sessionEndTime, sessionStartIndex, sessionEndIndex, samplingRate, ...
+    completed, errorReport, failedSegment)
+% LOCAL_SAVE_MATFILE  Save the companion .mat file recording this group's
+%   conversion metadata. Called both on normal completion (COMPLETED=true,
+%   ERRORREPORT/FAILEDSEGMENT empty) and from the segment-loop catch block
+%   (COMPLETED=false, with whatever partial state was available) so that a
+%   .mat file - and a record of whether the run actually finished - is
+%   always left behind, even if segment processing errored out.
+procTime = datetime; %#ok<*NASGU>
+save(matFile, 'inputFile', 'outputFile', 'options', 'nChans', 'procTime', 'zeroedPeriods', ...
+  'sessionStartTime', 'sessionEndTime', 'sessionStartIndex', 'sessionEndIndex', 'samplingRate', ...
+  'completed', 'errorReport', 'failedSegment', '-v7.3');
+
+
 function zeroedPeriods = local_append_zeroed_period(zeroedPeriods, channels, localIntervals, segmentInds, timestamps, method)
 % LOCAL_APPEND_ZEROED_PERIOD  Append one or more zeroed sample intervals to
 %   the accumulated per-channel record. LOCALINTERVALS is an Nx2 array of
