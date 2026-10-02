@@ -107,6 +107,14 @@ function [fullCoherence, half1Coherence, half2Coherence, ...
 %     phaseConf (cell): a shape-(K, 1) cell array containing phase upper
 %       and lower 95% confidence intervals (rad). Each cell contains a
 %       shape-(2, F) numeric array.
+%     phaseR (numeric): a shape-(K, F) numeric array containing the mean
+%       resultant vector length (circ_r) of the underlying per-segment
+%       phase estimates for each frequency (range = [0 1]). Unlike
+%       phaseConf (whose width is a function of both this consistency AND
+%       how many segments contributed), phaseR is a direct,
+%       sample-size-independent measure of how well those segments agreed
+%       - a narrow phaseConf interval does not by itself mean phase was
+%       reliably estimated; check phaseR too. NaN wherever phase is NaN.
 %     frequency (numeric): a shape-(K, F) numeric array containing
 %       frequency values corresponding to coherence and phase estimates.
 %     rateAdjustedCoherence (numeric): a shape-(K, F) numeric array
@@ -366,12 +374,14 @@ if options.fullCoherence
   fullCoherence.coherenceConf = vertcat(fullCoherence_temp.coherenceConf);
   fullCoherence.phase = vertcat(fullCoherence_temp.phase);
   fullCoherence.phaseConf = vertcat({fullCoherence_temp.phaseConf})';
+  fullCoherence.phaseR = vertcat(fullCoherence_temp.phaseR);
   fullCoherence.frequency = vertcat(fullCoherence_temp.frequency);
 else
   fullCoherence.coherence = [];
   fullCoherence.coherenceConf = [];
   fullCoherence.phase = [];
   fullCoherence.phaseConf = [];
+  fullCoherence.phaseR = [];
   fullCoherence.frequency = [];
 end
 
@@ -381,23 +391,27 @@ if options.halfCoherence
   half1Coherence.coherenceConf = vertcat(half1Coherence_temp.coherenceConf);
   half1Coherence.phase = vertcat(half1Coherence_temp.phase);
   half1Coherence.phaseConf = vertcat({half1Coherence_temp.phaseConf})';
+  half1Coherence.phaseR = vertcat(half1Coherence_temp.phaseR);
   half1Coherence.frequency = vertcat(half1Coherence_temp.frequency);
   half2Coherence_temp = cell2mat(half2Coherence_temp); % Convert into a structure of comma-separated lists
   half2Coherence.coherence = vertcat(half2Coherence_temp.coherence); % Convert lists into matrices
   half2Coherence.coherenceConf = vertcat(half2Coherence_temp.coherenceConf);
   half2Coherence.phase = vertcat(half2Coherence_temp.phase);
   half2Coherence.phaseConf = vertcat({half2Coherence_temp.phaseConf})';
+  half2Coherence.phaseR = vertcat(half2Coherence_temp.phaseR);
   half2Coherence.frequency = vertcat(half2Coherence_temp.frequency);
 else
   half1Coherence.coherence = [];
   half1Coherence.coherenceConf = [];
   half1Coherence.phase = [];
   half1Coherence.phaseConf = [];
+  half1Coherence.phaseR = [];
   half1Coherence.frequency = [];
   half2Coherence.coherence = [];
   half2Coherence.coherenceConf = [];
   half2Coherence.phase = [];
   half2Coherence.phaseConf = [];
+  half2Coherence.phaseR = [];
   half2Coherence.frequency = [];
 end
 
@@ -1113,26 +1127,26 @@ options.typespk2 = tempOptions.typespk1;
 % Calculate half phase and coherence
 if options.halfCoherence
   if sum(signal_1sthalf) && sum(reference_1sthalf) % 1st halves of both signals are not empty
-    [freq_1sthalf, coh_1sthalf, phi_1sthalf, coh_1sthalf_conf, phi_1sthalf_confU, phi_1sthalf_confL] = ...
+    [freq_1sthalf, coh_1sthalf, phi_1sthalf, coh_1sthalf_conf, phi_1sthalf_confU, phi_1sthalf_confL, phi_1sthalf_r] = ...
       freqDependentWindowCoherence(reference_1sthalf', signal_1sthalf', options.samplingInterval, [], options);
   end
   if sum(signal_2ndhalf) && sum(reference_2ndhalf) % 2nd halves of both signals are not empty
-    [freq_2ndhalf, coh_2ndhalf, phi_2ndhalf, coh_2ndhalf_conf, phi_2ndhalf_confU, phi_2ndhalf_confL] = ...
+    [freq_2ndhalf, coh_2ndhalf, phi_2ndhalf, coh_2ndhalf_conf, phi_2ndhalf_confU, phi_2ndhalf_confL, phi_2ndhalf_r] = ...
       freqDependentWindowCoherence(reference_2ndhalf', signal_2ndhalf', options.samplingInterval, [], options);
     if ~sum(signal_1sthalf) || ~sum(reference_1sthalf) || ~exist('freq_1sthalf','var') % The case when one of the first halves of two signals was empty
-      freq_1sthalf = NaN(size(freq_2ndhalf)); coh_1sthalf = NaN(size(coh_2ndhalf)); phi_1sthalf = NaN(size(phi_2ndhalf));
+      freq_1sthalf = NaN(size(freq_2ndhalf)); coh_1sthalf = NaN(size(coh_2ndhalf)); phi_1sthalf = NaN(size(phi_2ndhalf)); phi_1sthalf_r = NaN(size(phi_2ndhalf));
     end
   else % 2nd halves of any one of the two signals are empty
     if sum(signal_1sthalf)
       if ~exist('freq_1sthalf','var') % The case when one of the first halves of two signals was empty
         freq_1sthalf = freqDependentWindowCoherence(reference_1sthalf', [], options.samplingInterval, [], options);
-        coh_1sthalf = NaN(size(freq_1sthalf)); phi_1sthalf = NaN(size(freq_1sthalf));
+        coh_1sthalf = NaN(size(freq_1sthalf)); phi_1sthalf = NaN(size(freq_1sthalf)); phi_1sthalf_r = NaN(size(freq_1sthalf));
       end
-      freq_2ndhalf = freq_1sthalf; coh_2ndhalf = NaN(size(coh_1sthalf)); phi_2ndhalf = NaN(size(phi_1sthalf));
+      freq_2ndhalf = freq_1sthalf; coh_2ndhalf = NaN(size(coh_1sthalf)); phi_2ndhalf = NaN(size(phi_1sthalf)); phi_2ndhalf_r = NaN(size(phi_1sthalf));
     else % Both signals are totally empty
       freq_1sthalf = freqDependentWindowCoherence(reference_1sthalf', [], options.samplingInterval, [], options);
-      coh_1sthalf = NaN(size(freq_1sthalf)); phi_1sthalf = NaN(size(freq_1sthalf));
-      freq_2ndhalf = freq_1sthalf; coh_2ndhalf = NaN(size(coh_1sthalf)); phi_2ndhalf = NaN(size(phi_1sthalf));
+      coh_1sthalf = NaN(size(freq_1sthalf)); phi_1sthalf = NaN(size(freq_1sthalf)); phi_1sthalf_r = NaN(size(freq_1sthalf));
+      freq_2ndhalf = freq_1sthalf; coh_2ndhalf = NaN(size(coh_1sthalf)); phi_2ndhalf = NaN(size(phi_1sthalf)); phi_2ndhalf_r = NaN(size(phi_1sthalf));
     end
   end
 
@@ -1140,17 +1154,19 @@ if options.halfCoherence
   if exist('phi_1sthalf','var') && exist('phi_1sthalf_confU','var') && exist('phi_1sthalf_confL','var')
     phi_1sthalf(isnan(phi_1sthalf_confU)) = NaN;
     phi_1sthalf(isnan(phi_1sthalf_confL)) = NaN;
+    phi_1sthalf_r(isnan(phi_1sthalf)) = NaN;
   else
     phi_1sthalf = NaN(size(freq_1sthalf));
-    phi_1sthalf_confU = NaN(size(freq_1sthalf)); phi_1sthalf_confL = NaN(size(freq_1sthalf));
+    phi_1sthalf_confU = NaN(size(freq_1sthalf)); phi_1sthalf_confL = NaN(size(freq_1sthalf)); phi_1sthalf_r = NaN(size(freq_1sthalf));
     coh_1sthalf = NaN(size(freq_1sthalf)); coh_1sthalf_conf = NaN(size(freq_1sthalf));
   end
   if exist('phi_2ndhalf','var') && exist('phi_2ndhalf_confU','var') && exist('phi_2ndhalf_confL','var')
     phi_2ndhalf(isnan(phi_2ndhalf_confU)) = NaN;
     phi_2ndhalf(isnan(phi_2ndhalf_confL)) = NaN;
+    phi_2ndhalf_r(isnan(phi_2ndhalf)) = NaN;
   else
     phi_2ndhalf = NaN(size(freq_2ndhalf));
-    phi_2ndhalf_confU = NaN(size(freq_2ndhalf)); phi_2ndhalf_confL = NaN(size(freq_2ndhalf));
+    phi_2ndhalf_confU = NaN(size(freq_2ndhalf)); phi_2ndhalf_confL = NaN(size(freq_2ndhalf)); phi_2ndhalf_r = NaN(size(freq_2ndhalf));
     coh_2ndhalf = NaN(size(freq_2ndhalf)); coh_2ndhalf_conf = NaN(size(freq_2ndhalf));
   end
 end
@@ -1158,18 +1174,19 @@ end
 % Calculate full phase and coherence
 if options.fullCoherence
   if sum(signal) && sum(reference)
-    [freq, coh, phi, coh_conf, phi_confU, phi_confL] = freqDependentWindowCoherence(reference', signal', options.samplingInterval, [], options);
+    [freq, coh, phi, coh_conf, phi_confU, phi_confL, phi_r] = freqDependentWindowCoherence(reference', signal', options.samplingInterval, [], options);
     % Eliminate phase values with no defined confidence intervals
     if ~isempty(freq)
       phi(isnan(phi_confU)) = NaN;
       phi(isnan(phi_confL)) = NaN;
+      phi_r(isnan(phi)) = NaN;
     end
   else
     freq = freqDependentWindowCoherence(reference', [], options.samplingInterval, [], options);
-    coh = NaN(size(freq)); phi = NaN(size(freq)); coh_conf = NaN(size(freq)); phi_confU = NaN(size(freq)); phi_confL = NaN(size(freq));
+    coh = NaN(size(freq)); phi = NaN(size(freq)); coh_conf = NaN(size(freq)); phi_confU = NaN(size(freq)); phi_confL = NaN(size(freq)); phi_r = NaN(size(freq));
   end
 else
-  freq = []; coh = []; phi = []; coh_conf = []; phi_confU = []; phi_confL = [];
+  freq = []; coh = []; phi = []; coh_conf = []; phi_confU = []; phi_confL = []; phi_r = [];
 end
 
 % Assign output structures
@@ -1178,6 +1195,7 @@ if options.halfCoherence
   half1Coherence.coherenceConf = coh_1sthalf_conf(:)';
   half1Coherence.phase = phi_1sthalf(:)';
   half1Coherence.phaseConf = [phi_1sthalf_confU(:)'; phi_1sthalf_confL(:)'];
+  half1Coherence.phaseR = phi_1sthalf_r(:)';
   if exist('freq_1sthalf','var')
     half1Coherence.frequency = freq_1sthalf(:)';
   else
@@ -1187,6 +1205,7 @@ if options.halfCoherence
   half2Coherence.coherenceConf = coh_2ndhalf_conf(:)';
   half2Coherence.phase = phi_2ndhalf(:)';
   half2Coherence.phaseConf = [phi_2ndhalf_confU(:)'; phi_2ndhalf_confL(:)'];
+  half2Coherence.phaseR = phi_2ndhalf_r(:)';
   if exist('freq_2ndhalf','var')
     half2Coherence.frequency = freq_2ndhalf(:)';
   else
@@ -1197,11 +1216,13 @@ else
   half1Coherence.coherenceConf = [];
   half1Coherence.phase = [];
   half1Coherence.phaseConf = [];
+  half1Coherence.phaseR = [];
   half1Coherence.frequency = [];
   half2Coherence.coherence = [];
   half2Coherence.coherenceConf = [];
   half2Coherence.phase = [];
   half2Coherence.phaseConf = [];
+  half2Coherence.phaseR = [];
   half2Coherence.frequency = [];
 end
 
@@ -1210,12 +1231,14 @@ if options.fullCoherence
   fullCoherence.coherenceConf = coh_conf(:)';
   fullCoherence.phase = phi(:)';
   fullCoherence.phaseConf = [phi_confU(:)'; phi_confL(:)'];
+  fullCoherence.phaseR = phi_r(:)';
   fullCoherence.frequency = freq(:)';
 else
   fullCoherence.coherence = [];
   fullCoherence.coherenceConf = [];
   fullCoherence.phase = [];
   fullCoherence.phaseConf = [];
+  fullCoherence.phaseR = [];
   fullCoherence.frequency = [];
 end
 end

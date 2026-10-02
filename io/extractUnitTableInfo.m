@@ -28,7 +28,14 @@ function spikeData = extractUnitTableInfo(binaryFileBasename, unitTableFile)
 %       leadLabels - lead labels;
 %       areaLabels - area where units were recorded;
 %       files - names of binary files with recorded units;
-%       startTimes - start times of those binary files in seconds.
+%       startTimes - start times of those binary files in seconds (NWB
+%         timestamp clock; informational only - see startIndices).
+%       startIndices - 1-based sample indices, into the full NWB
+%         acquisition TimeSeries, of the first sample of those binary
+%         files. This is what cellexplorer2nwb.m uses to place spikes:
+%         start times cannot be converted back to sample indices with a
+%         nominal sampling rate, because the NWB timestamp clock drifts
+%         relative to it (~83 ms over 62,500 s in some recordings).
 %       x, y, z - 3D atlas coordinates
 %
 % Authors:
@@ -43,7 +50,10 @@ end
 if isempty(unitTableFile)
   unitTable = [];
 else
+  fprintf('extractUnitTableInfo: reading unit table %s\n', unitTableFile);
   unitTable = readtable(unitTableFile);
+  fprintf('extractUnitTableInfo: unit table has %d row(s), %d column(s)\n', ...
+    height(unitTable), size(unitTable,2));
 end
 
 % Initialise storage variables
@@ -55,6 +65,7 @@ spikeData.leadLabels = {};
 spikeData.areaLabels = {};
 spikeData.files = {};
 spikeData.startTimes = [];
+spikeData.startIndices = [];
 spikeData.x = [];
 spikeData.y = [];
 spikeData.z = [];
@@ -65,18 +76,23 @@ spikeData_muas.newGlobalUnitCh = [];
 spikeData_muas.newGlobalUnitIDs = [];
 spikeData_muas.files = {};
 spikeData_muas.startTimes = [];
+spikeData_muas.startIndices = [];
 spikeData_muas.types = {};
 
 % Extract data
 if isempty(unitTable)
   matFilename = [binaryFileBasename filesep 'temp_wh.spikes.cellinfo.mat'];
+  fprintf('extractUnitTableInfo: loading %s...\n', matFilename);
+  ticLoad = tic;
   load(matFilename) %#ok<*LOAD>
+  fprintf('extractUnitTableInfo: loaded %s (%.1f s)\n', matFilename, toc(ticLoad));
   spikeData.existingUnitIDs = spikes.cluID;
   spikeData.newGlobalUnitCh = spikes.maxWaveformCh;
   for iUnit = 1:spikes.numcells
     spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs iUnit];
     spikeData.files = [spikeData.files matFilename];
     spikeData.startTimes = [spikeData.startTimes 0];
+    spikeData.startIndices = [spikeData.startIndices 1];
   end
   spikeData.types = spikes.labels;
 else
@@ -102,6 +118,7 @@ else
     nDataRows = totalRowIdx - 1;
   end
 
+  fprintf('extractUnitTableInfo: scanning %d column(s) for chunk id-columns\n', nColumns);
   for iColumn = 1:nColumns
     label = labels{iColumn};
     columnData = unitTable.(label)';
@@ -129,6 +146,8 @@ else
     valueMask = [valueMask false(1, tableHeight - nDataRows)]; %#ok<AGROW>
     if (startsWith(label, 'x') || startsWith(label, '_')) && (endsWith(label, 'Id') || endsWith(label, 'id'))
       nBinFiles = nBinFiles + 1;
+      fprintf('extractUnitTableInfo: chunk column ''%s'' (chunk #%d) - %d curated unit(s)\n', ...
+        label, nBinFiles, nUnits);
       spikeData.existingUnitIDs = [spikeData.existingUnitIDs columnData];
       spikeData.newGlobalUnitIDs = [spikeData.newGlobalUnitIDs unitTable.id(valueMask)'];
       spikeData.newGlobalUnitCh = [spikeData.newGlobalUnitCh unitTable.ch(valueMask)'];
@@ -162,12 +181,24 @@ else
           'required to determine the chunk''s true start time.'], ...
           chunkFolder, conversionMatFile);
       end
-      conversionInfo = load(conversionMatFile, 'sessionStartTime'); %#ok<*LOAD>
+      fprintf('extractUnitTableInfo:   loading conversion file %s...\n', conversionMatFile);
+      conversionInfo = load(conversionMatFile, 'sessionStartTime', 'sessionStartIndex'); %#ok<*LOAD>
+      if ~isfield(conversionInfo, 'sessionStartIndex') || isempty(conversionInfo.sessionStartIndex)
+        error('extractUnitTableInfo:missingStartIndex', ...
+          ['Conversion file %s has no sessionStartIndex. The chunk''s start ' ...
+          'sample index is required to place its spikes correctly; it cannot ' ...
+          'be recovered from sessionStartTime with a nominal sampling rate.'], ...
+          conversionMatFile);
+      end
       chunkStartTime = conversionInfo.sessionStartTime;
+      chunkStartIndex = double(conversionInfo.sessionStartIndex);
+      fprintf('extractUnitTableInfo:   chunk start time = %.3f s, start index = %d\n', ...
+        chunkStartTime, chunkStartIndex);
 
       for iUnit = 1:nUnits
         spikeData.files = [spikeData.files matFilename];
         spikeData.startTimes = [spikeData.startTimes chunkStartTime];
+        spikeData.startIndices = [spikeData.startIndices chunkStartIndex];
         spikeData.types = [spikeData.types 'unit'];
       end
       try
@@ -178,7 +209,11 @@ else
         % do nothing
       end
 
+      fprintf('extractUnitTableInfo:   loading %s (scanning for MUA clusters)...\n', matFilename);
+      ticLoad = tic;
       load(matFilename) %#ok<*LOAD>
+      fprintf('extractUnitTableInfo:   loaded %s (%.1f s, %d cluster(s) total)\n', ...
+        matFilename, toc(ticLoad), spikes.numcells);
       for iUnit = 1:spikes.numcells
         if strcmpi(spikes.labels{iUnit}, 'mua')
           spikeData_muas.existingUnitIDs = [spikeData_muas.existingUnitIDs spikes.cluID(iUnit)];
@@ -186,14 +221,21 @@ else
           spikeData_muas.newGlobalUnitCh = [spikeData_muas.newGlobalUnitCh spikes.maxWaveformCh(iUnit)];
           spikeData_muas.files = [spikeData_muas.files matFilename];
           spikeData_muas.startTimes = [spikeData_muas.startTimes chunkStartTime];
+          spikeData_muas.startIndices = [spikeData_muas.startIndices chunkStartIndex];
           spikeData_muas.types = [spikeData_muas.types 'mua'];
         end
       end
     end
   end
 
+  fprintf('extractUnitTableInfo: found %d MUA cluster(s) across all chunks\n', ...
+    numel(spikeData_muas.existingUnitIDs));
   if ~isempty(spikeData_muas.existingUnitIDs)
-    nUnits = max(spikeData.newGlobalUnitIDs);
+    % max([]) is [] (not 0), which would silently corrupt every MUA's
+    % newGlobalUnitIDs entry below (spikeData_muas...+[] is [] in MATLAB)
+    % whenever a session has zero manually-curated SUA/'good' units - a
+    % legitimate case (MUA-only sessions), not an error condition.
+    nUnits = max([spikeData.newGlobalUnitIDs 0]);
     nEntries = numel(spikeData.newGlobalUnitIDs);
     for iUnit = 1:numel(spikeData_muas.existingUnitIDs)
       spikeData.existingUnitIDs = [spikeData.existingUnitIDs spikeData_muas.existingUnitIDs(iUnit)];
@@ -201,6 +243,7 @@ else
       spikeData.newGlobalUnitCh = [spikeData.newGlobalUnitCh spikeData_muas.newGlobalUnitCh(iUnit)];
       spikeData.files{nEntries+iUnit} = spikeData_muas.files{iUnit};
       spikeData.startTimes = [spikeData.startTimes spikeData_muas.startTimes(iUnit)];
+      spikeData.startIndices = [spikeData.startIndices spikeData_muas.startIndices(iUnit)];
       spikeData.types{nEntries+iUnit} = spikeData_muas.types{iUnit};
       chInds = find(ismember(spikeData.newGlobalUnitCh(1:end-1), spikeData.newGlobalUnitCh(end)));
       if ~isempty(chInds)
@@ -225,4 +268,16 @@ else
       end
     end
   end
+end
+fprintf('extractUnitTableInfo: done - %d total entr%s (SUA + MUA)\n', ...
+  numel(spikeData.newGlobalUnitIDs), local_plural_ies(numel(spikeData.newGlobalUnitIDs)));
+end
+
+
+function s = local_plural_ies(n)
+if n == 1
+  s = 'y';
+else
+  s = 'ies';
+end
 end

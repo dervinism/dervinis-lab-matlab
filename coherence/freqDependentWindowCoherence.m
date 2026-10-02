@@ -26,12 +26,20 @@
 %          phase- phase (of spk2 wrt spk1, e.g. a small positive (linear) phase means spk2 precedes spk1
 %          conf - 95% confidence interval for coherence (or PSD)
 %          phaseCu, phaseCl - upper and lower confidence intervals for phase
+%          phaseR - mean resultant vector length (circ_r) of the per-segment
+%                   phase estimates underlying each frequency row's phase -
+%                   0 to 1, a sample-size-independent measure of how tightly
+%                   those segments actually agreed (unlike phaseCu/phaseCl,
+%                   whose width is a function of both this consistency AND
+%                   the number of segments, so a narrow CI does not by
+%                   itself imply a well-agreed-upon phase). NaN wherever
+%                   phase itself is NaN (no valid segments for that row).
 % For spk2 = [] will compute the PSD (in coh output, phi is meaningless).
 % For PSD estimation in the continuous case, provided the entire bandwith is used, it should hold that trapz(freq, coh) equals to var(spk1)/2
 %
 % The function was originally written by Michael Okun and later modified by
 % Martynas Dervinis (martynas.dervinis@gmail.com).
-function [freq, coh, phase, conf, phaseCu, phaseCl] = freqDependentWindowCoherence(spk1, spk2, dt, spk3, opt)
+function [freq, coh, phase, conf, phaseCu, phaseCl, phaseR] = freqDependentWindowCoherence(spk1, spk2, dt, spk3, opt)
 
 if nargin < 4
   spk3 = [];
@@ -116,6 +124,7 @@ coh = [];
 phase = [];
 conf = [];
 phaseCu = []; phaseCl = [];
+phaseR = [];
 while true
   L = opt.winfactor/startFreq;
   if opt.winfactor*L > numel(spk1)*dt
@@ -170,7 +179,7 @@ while true
       otherwise
         error('unknown type of spk1')
     end
-    phi = []; phiCu = []; phiCl = [];
+    phi = []; phiCu = []; phiCl = []; phiR = [];
     confC = abs(confC(1,:)'-C);
   elseif ~isempty(spk3) % partial coherence computation
     assert(max(spk1) - min(spk1) > 0 && max(spk2) - min(spk2) > 0, 'spk1 or/and spk2 is constant?!')
@@ -181,11 +190,11 @@ while true
     else
       error('such partial coherence not supported')
     end
-    phi = []; phiCu = []; phiCl = [];
+    phi = []; phiCu = []; phiCl = []; phiR = [];
     confC = [];
   else % coherence computation
     if ~sum(spk1) || ~sum(spk2)
-      f = mean(params.fpass); C = NaN; phi = NaN; confC = NaN; phiCu = NaN; phiCl = NaN;
+      f = mean(params.fpass); C = NaN; phi = NaN; confC = NaN; phiCu = NaN; phiCl = NaN; phiR = NaN;
     else
       if opt.jack && opt.tapers * ceil(numel(spk1)*dt / L) < 1000 % indication for degree of freedoms relevant for jackknife
         % when the above product is too high, jackkinife is prohibitively long...
@@ -204,9 +213,15 @@ while true
         assert(abs(mean(spk1)) < 1e-3 && abs(mean(spk2)) < 1e-3, 'continuous data must be mean subtracted')
         [~,phi,~,~,~,f] = coherencysegc(spk1, spk2, L, params, false);
         if params.err(1) == 2
-          [C, ~, ~, ~, ~, ~, ~, ~, ~, confC] = coherencysegc(spk1, spk2, L, params, true);
+          % coherencysegc output order is [C,phi,S12,S1,S2,f,confC,phistd,Cerr] -
+          % Cerr (position 9, the jackknife lower/upper bounds used below) is
+          % what's wanted here, not confC (position 7) or phistd (position 8).
+          [C, ~, ~, ~, ~, ~, ~, ~, confC] = coherencysegc(spk1, spk2, L, params, true);
         else
-          [C, ~, ~, ~, ~, ~, ~, confC] = coherencysegc(spk1, spk2, L, params, true);
+          % Position 7 is confC; the previous version of this line captured
+          % position 8 (phistd) instead, so the non-jackknife coherence
+          % confidence output was actually phase std mislabeled as confC.
+          [C, ~, ~, ~, ~, ~, confC] = coherencysegc(spk1, spk2, L, params, true);
         end
       elseif strcmpi(opt.typespk1, 'c') && strcmpi(opt.typespk2, 'pb')
         assert(abs(mean(spk1)) < 1e-3, 'continuous data must be mean subtracted')
@@ -239,10 +254,21 @@ while true
 
       % In some intervals there may be 0 spikes, and so C & phi are NaN there
       if exist('zerosp', 'var')
-        [phi, phiCu, phiCl] = circ_mean(phi(:, ~zerosp), [], 2);
+        phiValid = phi(:, ~zerosp);
       else % when both signals are continuous
-        [phi, phiCu, phiCl] = circ_mean(phi, [], 2);
+        phiValid = phi;
       end
+      % circ_mean(..., dim) sums across dim with plain sum(), which is
+      % NaN-propagating: a single NaN segment (possible even after the
+      % zerosp exclusion above, e.g. from near-zero cross-spectral power
+      % in one segment - zerosp only excludes segments with literally
+      % zero spikes) silently poisons the WHOLE row's averaged phase to
+      % NaN, discarding every other segment's otherwise valid estimate.
+      % local_circ_mean_omitnan excludes NaN segments per frequency row
+      % (independently per row, since which segments are NaN can differ
+      % by frequency) before averaging, rather than letting one bad
+      % segment erase the rest.
+      [phi, phiCu, phiCl, phiR] = local_circ_mean_omitnan(phiValid);
       % In addition, I've encountered rare cases (where the mean is on just 2 values?) where confidence intervals were complex
       phiCu(abs(phiCu - real(phiCu)) > 0) = NaN;
       phiCl(abs(phiCl - real(phiCl)) > 0) = NaN;
@@ -259,6 +285,7 @@ while true
   phase = [phase torow(phi)];
   conf = [conf torow(confC)];
   phaseCu = [phaseCu torow(phiCu)]; phaseCl = [phaseCl torow(phiCl)];
+  phaseR = [phaseR torow(phiR)];
   startFreq = startFreq/opt.freqfactor;
 end
 [~,i] = sort(freq);
@@ -271,6 +298,7 @@ coh = coh(i);
 if ~isempty(phase)
   phase = phase(i);
   phaseCu = phaseCu(i); phaseCl = phaseCl(i);
+  phaseR = phaseR(i);
 end
 if ~isempty(conf)
   conf = conf(i);
@@ -281,6 +309,36 @@ if ~isempty(conf)
   phaseCu(coh - conf <= 0) = NaN;
   phaseCl(coh - conf <= 0) = NaN;
 end
+end % freqDependentWindowCoherence
+
+
+function [mu, ul, ll, r] = local_circ_mean_omitnan(phi)
+% Row-wise circular mean (one row per frequency, one column per
+% segment), excluding NaN segments independently per row - which
+% segments are NaN can differ by frequency row, so this can't be done
+% with one vectorised circ_mean(phi, [], 2) call the way the all-valid
+% case is. A row with every segment NaN (or zero columns) returns NaN,
+% matching circ_mean's own behaviour on empty/all-NaN input. Also
+% returns r (circ_r), the mean resultant vector length of that row's
+% own valid segments - unlike ul/ll (whose width conflates true
+% consistency with the number of segments), r is a direct,
+% sample-size-independent measure of how well those segments actually
+% agreed with each other.
+  nRows = size(phi, 1);
+  mu = nan(nRows, 1);
+  ul = nan(nRows, 1);
+  ll = nan(nRows, 1);
+  r = nan(nRows, 1);
+  for iRow = 1:nRows
+    rowVals = phi(iRow, ~isnan(phi(iRow, :)));
+    if isempty(rowVals)
+      continue
+    end
+    [mu(iRow), ul(iRow), ll(iRow)] = circ_mean(rowVals(:));
+    r(iRow) = circ_r(rowVals(:));
+  end
+end
+
 
 %------ For debugging only:
 % figure;

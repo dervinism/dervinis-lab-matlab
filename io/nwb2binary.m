@@ -107,6 +107,18 @@ function nwb2binary(inputFile, outputFile, options)
 %   segmentRange (numeric, optional, keyword): a shape-(1, 2) numeric array
 %     defining segment range for saving inclusively. If left empty, all
 %     segments are saved within a single file (default).
+%   channels (char | cell, optional, keyword): channels of the timeseries
+%     group to write to the binary file. Either 'micro' (every channel
+%     whose electrode table isMicro entry is 1, in acquisition order) or a
+%     cell array of electrode table labels (e.g., {'LB_micro1', ...}),
+%     written in the order given. The number of selected channels must be
+%     a multiple of 4 so that channelGroups (tetrodes) line up with the
+%     binary's channels. If left empty, all channels of the timeseries
+%     group are written (default). Channel numbers in zeroPeriods and
+%     channelGroups refer to the selected channels (1 = first written
+%     channel). The selection (acquisition columns, electrode table rows
+%     and labels) is saved in the companion .mat file so that downstream
+%     code can map binary channels back to NWB channels.
 %
 % Returns:
 %   None
@@ -138,6 +150,7 @@ arguments
   options.channelGroups (:,:) {mustBePositive} = [1:4; 5:8; 9:12; 13:16; 17:20; 21:24; 25:28; 29:32];
   options.segmentSize (1,1) {mustBePositive, mustBeInteger} = 1e8
   options.segmentRange (:,:) {mustBeNumeric} = []
+  options.channels (:,:) {mustBeCharOrListedType(options.channels, 'cell')} = ''
 end
 
 % Parse input
@@ -166,8 +179,12 @@ nGroups = numel(options.timeseriesGroup);
 for iGroup = 1:nGroups
   dataContainer = nwbData.acquisition.get(options.timeseriesGroup{iGroup});
 
+  % Resolve which of this group's channels to write (all by default)
+  [channelIndices, electrodeRows, channelLabels] = local_select_channels( ...
+    inputFile, options.timeseriesGroup{iGroup}, size(dataContainer.data,1), options.channels);
+
   % Initialize the per-channel container for periods zeroed out during this group's conversion
-  nChans = size(dataContainer.data,1);
+  nChans = numel(channelIndices);
   zeroedPeriods = cell(nChans, 1);
   for iChan = 1:nChans
     zeroedPeriods{iChan} = struct('startIndex', [], 'endIndex', [], ...
@@ -199,7 +216,14 @@ for iGroup = 1:nGroups
     disp(['Segment ' num2str(iSegment) '/' num2str(nSegments)]);
     segmentInds = (1:options.segmentSize) + (iSegment-1)*options.segmentSize;
     segmentInds(segmentInds > size(dataContainer.data,2)) = [];
-    timeseriesData = dataContainer.data(:,segmentInds);
+    if isequal(channelIndices, 1:size(dataContainer.data,1))
+      timeseriesData = dataContainer.data(:,segmentInds);
+    elseif isequal(channelIndices, channelIndices(1):channelIndices(end))
+      timeseriesData = dataContainer.data(channelIndices(1):channelIndices(end),segmentInds); % contiguous: read only these rows
+    else
+      timeseriesData = dataContainer.data(:,segmentInds);
+      timeseriesData = timeseriesData(channelIndices,:);
+    end
     %timeseriesData = dataContainer.data(10:25,segmentInds);
     if ~isempty(dataContainer.timestamps)
       timestamps = dataContainer.timestamps(segmentInds)';
@@ -553,7 +577,7 @@ for iGroup = 1:nGroups
     end
     local_save_matfile(matFile, inputFile, outputFile, options, nChans, zeroedPeriods, ...
       sessionStartTime, sessionEndTime, sessionStartIndex, sessionEndIndex, samplingRate, ...
-      false, getReport(ME), failedSegment);
+      false, getReport(ME), failedSegment, channelIndices, electrodeRows, channelLabels);
     rethrow(ME);
   end
 
@@ -563,24 +587,86 @@ for iGroup = 1:nGroups
   end
   local_save_matfile(matFile, inputFile, outputFile, options, nChans, zeroedPeriods, ...
     sessionStartTime, sessionEndTime, sessionStartIndex, sessionEndIndex, samplingRate, ...
-    true, '', []);
+    true, '', [], channelIndices, electrodeRows, channelLabels);
 end
 
 
 %% Helper functions
 function local_save_matfile(matFile, inputFile, outputFile, options, nChans, zeroedPeriods, ...
     sessionStartTime, sessionEndTime, sessionStartIndex, sessionEndIndex, samplingRate, ...
-    completed, errorReport, failedSegment)
+    completed, errorReport, failedSegment, channelIndices, electrodeRows, channelLabels)
 % LOCAL_SAVE_MATFILE  Save the companion .mat file recording this group's
 %   conversion metadata. Called both on normal completion (COMPLETED=true,
 %   ERRORREPORT/FAILEDSEGMENT empty) and from the segment-loop catch block
 %   (COMPLETED=false, with whatever partial state was available) so that a
 %   .mat file - and a record of whether the run actually finished - is
 %   always left behind, even if segment processing errored out.
+%   channelIndices (1-based acquisition columns), electrodeRows (0-based
+%   electrode table rows) and channelLabels record which NWB channel each
+%   binary channel holds, in binary order.
 procTime = datetime; %#ok<*NASGU>
 save(matFile, 'inputFile', 'outputFile', 'options', 'nChans', 'procTime', 'zeroedPeriods', ...
   'sessionStartTime', 'sessionEndTime', 'sessionStartIndex', 'sessionEndIndex', 'samplingRate', ...
-  'completed', 'errorReport', 'failedSegment', '-v7.3');
+  'completed', 'errorReport', 'failedSegment', 'channelIndices', 'electrodeRows', 'channelLabels', '-v7.3');
+
+
+function [channelIndices, electrodeRows, channelLabels] = local_select_channels(inputFile, groupName, nGroupChans, selection)
+% LOCAL_SELECT_CHANNELS  Resolve the 'channels' option to 1-based column
+%   positions within the timeseries group's data (CHANNELINDICES), their
+%   0-based electrode table rows (ELECTRODEROWS) and labels (CHANNELLABELS),
+%   all in the order the channels are written to the binary. An empty
+%   SELECTION keeps every channel of the group, in acquisition order.
+electrodeRows = double(h5read(inputFile, ['/acquisition/' groupName '/electrodes']));
+electrodeRows = electrodeRows(:)';
+assert(numel(electrodeRows) == nGroupChans, 'nwb2binary:electrodesMismatch', ...
+  'The %s electrodes dataset lists %d channels but its data has %d.', groupName, numel(electrodeRows), nGroupChans);
+allLabels = local_read_strings(inputFile, '/general/extracellular_ephys/electrodes/label');
+groupLabels = allLabels(electrodeRows + 1);
+
+if isempty(selection)
+  channelIndices = 1:nGroupChans;
+elseif ischar(selection) && strcmpi(selection, 'micro')
+  isMicro = local_read_strings(inputFile, '/general/extracellular_ephys/electrodes/isMicro');
+  channelIndices = find(strcmp(strtrim(isMicro(electrodeRows + 1)), '1'));
+  if isempty(channelIndices)
+    error('nwb2binary:noMicroChannels', 'No micro channels (isMicro = 1) found in %s.', groupName);
+  end
+else
+  if ischar(selection)
+    selection = {selection};
+  end
+  channelIndices = zeros(1, numel(selection));
+  for iSel = 1:numel(selection)
+    match = find(strcmp(groupLabels, selection{iSel}));
+    if numel(match) ~= 1
+      error('nwb2binary:channelNotFound', ...
+        'Channel ''%s'' matches %d channels of %s (expected exactly 1).', selection{iSel}, numel(match), groupName);
+    end
+    channelIndices(iSel) = match;
+  end
+  if numel(unique(channelIndices)) ~= numel(channelIndices)
+    error('nwb2binary:duplicateChannels', 'The channels option lists the same channel more than once.');
+  end
+end
+
+if ~isempty(selection) && mod(numel(channelIndices), 4)
+  error('nwb2binary:channelsNotInFours', ...
+    ['%d channels selected from %s; the number must be a multiple of 4 so that ' ...
+    'channelGroups (tetrodes) line up with the binary''s channels.'], numel(channelIndices), groupName);
+end
+electrodeRows = electrodeRows(channelIndices);
+channelLabels = groupLabels(channelIndices);
+fprintf('Writing %d of %d %s channels: %s\n', numel(channelIndices), nGroupChans, groupName, strjoin(channelLabels, ', '));
+
+
+function strings = local_read_strings(inputFile, datasetPath)
+% LOCAL_READ_STRINGS  Read an HDF5 string dataset as a 1-by-n cellstr.
+raw = h5read(inputFile, datasetPath);
+if iscell(raw)
+  strings = cellfun(@(x) strtrim(char(x)), raw(:)', 'UniformOutput', false);
+else
+  strings = cellstr(string(raw(:)'));
+end
 
 
 function zeroedPeriods = local_append_zeroed_period(zeroedPeriods, channels, localIntervals, segmentInds, timestamps, method)
