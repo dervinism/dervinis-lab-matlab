@@ -68,6 +68,12 @@ function unitsData = cellexplorer2nwb(spikeData, nwbFile, options)
 %     true, everything is computed from nwbFile but nothing is copied or
 %     written - use the returned unitsData to verify spike times against
 %     the raw data before injecting (default is false).
+%   acqGroup (char, optional, keyword): name of the NWB acquisition
+%     TimeSeries the spikes were sorted from. Default '' derives it from
+%     the CellExplorer sampling rate ('TimeSeries_<sr>_Hz'), which is wrong
+%     when the group was renamed after sorting - e.g. recordings whose MED
+%     header rate was corrected (MSEL02685 ses-nonstim01: sorted as 14223 Hz,
+%     now TimeSeries_32000_Hz). Sample indices are unaffected.
 %
 % Returns:
 %   unitsData (struct): the input struct passed to writeUnitsTableH5.m,
@@ -87,6 +93,7 @@ arguments
   options.outputFile (1,:) {mustBeA(options.outputFile,'char'),mustBeVector,endsWith(options.outputFile,'.nwb')} = '';
   options.loadCoordsFromUnitTable (1,1) {islogical} = false
   options.dryRun (1,1) {islogical} = false
+  options.acqGroup (1,:) char = ''
 end
 
 % Parse input
@@ -186,7 +193,11 @@ end
 % HDF5 (no matnwb) - only the columns actually needed.
 electrodesTable = local_read_electrodes_table(options.outputFile, ...
   {'ChName','label','x','y','z','group_name'});
-acqKey = ['TimeSeries_' num2str(spikes.sr) '_Hz'];
+if isempty(options.acqGroup)
+  acqKey = ['TimeSeries_' num2str(spikes.sr) '_Hz'];
+else
+  acqKey = options.acqGroup;
+end
 
 % Remap spike sample indices to NWB timestamps because kilosort spike sorter
 % uses fixed sampling rate which might not always agree with NWB timestamps.
