@@ -78,5 +78,5 @@ else
   rasterHist = reshape(spikeCounts', [(sr/newsr) durationNew size(spikeCounts,1)]);
 
   resampledSpikeCounts = squeeze(sum(rasterHist,1))';
-  timeBins = (1:durationNew).*(1/newsr) + 0.5/newsr;
+  timeBins = (1:durationNew).*(1/newsr) - 0.5/newsr; % bin centres (2026-11-24: was + 0.5/newsr, which stamped every bin one bin late)
 end
